@@ -1,7 +1,6 @@
 package core
 
 import (
-	"context"
 	"time"
 
 	rotel "github.com/wundergraph/cosmo/router/pkg/otel"
@@ -29,7 +28,6 @@ func (p OperationProtocol) String() string {
 // subgraph metrics are created in the transport or engine loader hooks.
 type OperationMetrics struct {
 	requestContentLength int64
-	routerMetrics        RouterMetrics
 	operationStartTime   time.Time
 	inflightMetric       func()
 	routerConfigVersion  string
@@ -37,43 +35,16 @@ type OperationMetrics struct {
 	trackUsageInfo       bool
 }
 
-func (m *OperationMetrics) Finish(reqContext *requestContext, statusCode int, responseSize int, exportSynchronous bool) {
-	ctx := context.Background()
-
+func (m *OperationMetrics) Finish(reqContext *requestContext, statusCode int) {
 	m.inflightMetric()
-
-	sliceAttrs := reqContext.telemetry.metricSliceAttrs
 
 	attrs := *reqContext.telemetry.AcquireAttributes()
 	defer reqContext.telemetry.ReleaseAttributes(&attrs)
 
 	attrs = append(attrs, semconv.HTTPStatusCode(statusCode))
 	attrs = append(attrs, reqContext.telemetry.metricAttrs...)
-
-	rm := m.routerMetrics.MetricStore()
-
-	latency := time.Since(m.operationStartTime)
-
-	o := otelmetric.WithAttributeSet(attribute.NewSet(attrs...))
-
 	if reqContext.error != nil {
-		rm.MeasureRequestError(ctx, sliceAttrs, o)
-
 		attrs = append(attrs, rotel.WgRequestError.Bool(true))
-		attrOpt := otelmetric.WithAttributeSet(attribute.NewSet(attrs...))
-
-		rm.MeasureRequestCount(ctx, sliceAttrs, attrOpt)
-		rm.MeasureLatency(ctx, latency, sliceAttrs, attrOpt)
-	} else {
-		rm.MeasureRequestCount(ctx, sliceAttrs, o)
-		rm.MeasureLatency(ctx, latency, sliceAttrs, o)
-	}
-
-	rm.MeasureRequestSize(ctx, m.requestContentLength, sliceAttrs, o)
-	rm.MeasureResponseSize(ctx, int64(responseSize), sliceAttrs, o)
-
-	if m.trackUsageInfo && reqContext.operation != nil && !reqContext.operation.executionOptions.SkipLoader {
-		m.routerMetrics.ExportSchemaUsageInfo(reqContext.operation, statusCode, reqContext.error != nil, exportSynchronous)
 	}
 }
 
@@ -82,24 +53,6 @@ type OperationMetricsOptions struct {
 	SliceAttributes      []attribute.KeyValue
 	RouterConfigVersion  string
 	RequestContentLength int64
-	RouterMetrics        RouterMetrics
 	Logger               *zap.Logger
 	TrackUsageInfo       bool
-}
-
-// newOperationMetrics creates a new OperationMetrics struct and starts the operation metrics.
-// routerMetrics.StartOperation()
-func newOperationMetrics(opts OperationMetricsOptions) *OperationMetrics {
-	operationStartTime := time.Now()
-
-	inflightMetric := opts.RouterMetrics.MetricStore().MeasureInFlight(context.Background(), opts.SliceAttributes, opts.InFlightAddOption)
-	return &OperationMetrics{
-		requestContentLength: opts.RequestContentLength,
-		operationStartTime:   operationStartTime,
-		inflightMetric:       inflightMetric,
-		routerConfigVersion:  opts.RouterConfigVersion,
-		routerMetrics:        opts.RouterMetrics,
-		logger:               opts.Logger,
-		trackUsageInfo:       opts.TrackUsageInfo,
-	}
 }

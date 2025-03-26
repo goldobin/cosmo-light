@@ -36,15 +36,9 @@ type (
 		Logger            *zap.Logger
 		Config            *Config
 		ServiceInstanceID string
-		IPAnonymization   *IPAnonymizationConfig
 		// MemoryExporter is used for testing purposes
 		MemoryExporter sdktrace.SpanExporter
 	}
-)
-
-const (
-	Hash   IPAnonymizationMethod = "hash"
-	Redact IPAnonymizationMethod = "redact"
 )
 
 func createExporter(log *zap.Logger, exp *ExporterConfig) (sdktrace.SpanExporter, error) {
@@ -158,24 +152,13 @@ func NewTracerProvider(ctx context.Context, config *ProviderConfig) (*sdktrace.T
 		)
 	}
 
-	if config.IPAnonymization != nil && config.IPAnonymization.Enabled {
-
-		var rFunc redact.RedactFunc
-
-		if config.IPAnonymization.Method == Hash {
-			rFunc = func(key attribute.KeyValue) string {
-				h := sha256.New()
-				return string(h.Sum([]byte(key.Value.AsString())))
-			}
-		} else if config.IPAnonymization.Method == Redact {
-			rFunc = func(key attribute.KeyValue) string {
-				return "[REDACTED]"
-			}
-
-		}
-
-		opts = append(opts, redact.Attributes(SensitiveAttributes, rFunc))
+	var rFunc redact.RedactFunc
+	rFunc = func(key attribute.KeyValue) string {
+		h := sha256.New()
+		return string(h.Sum([]byte(key.Value.AsString())))
 	}
+
+	opts = append(opts, redact.Attributes(SensitiveAttributes, rFunc))
 
 	if config.Config.Enabled {
 

@@ -11,8 +11,6 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/wundergraph/cosmo/router/internal/httpclient"
-	"github.com/wundergraph/cosmo/router/internal/jwt"
 	"go.opentelemetry.io/otel/codes"
 	semconv12 "go.opentelemetry.io/otel/semconv/v1.12.0"
 	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
@@ -32,30 +30,6 @@ type CDNSource struct {
 	// from the token, already url-escaped
 	organizationID string
 	httpClient     *http.Client
-}
-
-func NewCDNSource(endpoint, token string, logger *zap.Logger) (*CDNSource, error) {
-	u, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, err
-	}
-
-	claims, err := jwt.ExtractFederatedGraphTokenClaims(token)
-	if err != nil {
-		return nil, err
-	}
-
-	if logger == nil {
-		logger = zap.NewNop()
-	}
-
-	return &CDNSource{
-		cdnURL:              u,
-		authenticationToken: token,
-		federatedGraphID:    claims.FederatedGraphID,
-		organizationID:      claims.OrganizationID,
-		httpClient:          httpclient.NewRetryableHTTPClient(logger),
-	}, nil
 }
 
 func (c *CDNSource) LoadItems(ctx context.Context, log *zap.Logger) ([]*nodev1.Operation, error) {

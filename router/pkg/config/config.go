@@ -17,13 +17,6 @@ const (
 	DefaultConfigPath = "config.yaml"
 )
 
-type Graph struct {
-	// Token is required if no router config path is provided
-	Token string `yaml:"token,omitempty" env:"GRAPH_API_TOKEN"`
-	// SignKey is used to validate the signature of the received config. The same key is used to publish the subgraph in sign mode.
-	SignKey string `yaml:"sign_key,omitempty" env:"GRAPH_CONFIG_SIGN_KEY"`
-}
-
 type CustomStaticAttribute struct {
 	Key   string `yaml:"key"`
 	Value string `yaml:"value"`
@@ -133,15 +126,6 @@ type Telemetry struct {
 	Metrics            Metrics                 `yaml:"metrics"`
 }
 
-type CORS struct {
-	Enabled          bool          `yaml:"enabled" envDefault:"true" env:"CORS_ENABLED"`
-	AllowOrigins     []string      `yaml:"allow_origins" envDefault:"*" env:"CORS_ALLOW_ORIGINS"`
-	AllowMethods     []string      `yaml:"allow_methods" envDefault:"HEAD,GET,POST" env:"CORS_ALLOW_METHODS"`
-	AllowHeaders     []string      `yaml:"allow_headers" envDefault:"Origin,Content-Length,Content-Type" env:"CORS_ALLOW_HEADERS"`
-	AllowCredentials bool          `yaml:"allow_credentials" envDefault:"true" env:"CORS_ALLOW_CREDENTIALS"`
-	MaxAge           time.Duration `yaml:"max_age" envDefault:"5m" env:"CORS_MAX_AGE"`
-}
-
 type TrafficShapingRules struct {
 	// All is a set of rules that apply to all requests
 	All GlobalSubgraphRequestRule `yaml:"all"`
@@ -149,12 +133,6 @@ type TrafficShapingRules struct {
 	Router RouterTrafficConfiguration `yaml:"router"`
 	// Subgraphs is a set of rules that apply to requests from the router to subgraphs. The key is the subgraph name.
 	Subgraphs map[string]*GlobalSubgraphRequestRule `yaml:"subgraphs,omitempty"`
-}
-
-type FileUpload struct {
-	Enabled          bool        `yaml:"enabled" envDefault:"true" env:"FILE_UPLOAD_ENABLED"`
-	MaxFileSizeBytes BytesString `yaml:"max_file_size" envDefault:"50MB" env:"FILE_UPLOAD_MAX_FILE_SIZE"`
-	MaxFiles         int         `yaml:"max_files" envDefault:"10" env:"FILE_UPLOAD_MAX_FILES"`
 }
 
 type RouterTrafficConfiguration struct {
@@ -339,7 +317,6 @@ type EngineExecutionConfiguration struct {
 	WebSocketClientReadTimeout             time.Duration            `envDefault:"5s" env:"ENGINE_WEBSOCKET_CLIENT_READ_TIMEOUT" yaml:"websocket_client_read_timeout,omitempty"`
 	ExecutionPlanCacheSize                 int64                    `envDefault:"1024" env:"ENGINE_EXECUTION_PLAN_CACHE_SIZE" yaml:"execution_plan_cache_size,omitempty"`
 	MinifySubgraphOperations               bool                     `envDefault:"true" env:"ENGINE_MINIFY_SUBGRAPH_OPERATIONS" yaml:"minify_subgraph_operations"`
-	EnablePersistedOperationsCache         bool                     `envDefault:"true" env:"ENGINE_ENABLE_PERSISTED_OPERATIONS_CACHE" yaml:"enable_persisted_operations_cache"`
 	EnableNormalizationCache               bool                     `envDefault:"true" env:"ENGINE_ENABLE_NORMALIZATION_CACHE" yaml:"enable_normalization_cache"`
 	NormalizationCacheSize                 int64                    `envDefault:"1024" env:"ENGINE_NORMALIZATION_CACHE_SIZE" yaml:"normalization_cache_size,omitempty"`
 	OperationHashCacheSize                 int64                    `envDefault:"2048" env:"ENGINE_OPERATION_HASH_CACHE_SIZE" yaml:"operation_hash_cache_size,omitempty"`
@@ -355,15 +332,6 @@ type EngineExecutionConfiguration struct {
 type BlockOperationConfiguration struct {
 	Enabled   bool   `yaml:"enabled" envDefault:"false" env:"ENABLED"`
 	Condition string `yaml:"condition" env:"CONDITION"`
-}
-
-type SecurityConfiguration struct {
-	BlockMutations              BlockOperationConfiguration `yaml:"block_mutations" envPrefix:"SECURITY_BLOCK_MUTATIONS_"`
-	BlockSubscriptions          BlockOperationConfiguration `yaml:"block_subscriptions" envPrefix:"SECURITY_BLOCK_SUBSCRIPTIONS_"`
-	BlockNonPersistedOperations BlockOperationConfiguration `yaml:"block_non_persisted_operations" envPrefix:"SECURITY_BLOCK_NON_PERSISTED_OPERATIONS_"`
-	ComplexityCalculationCache  *ComplexityCalculationCache `yaml:"complexity_calculation_cache"`
-	ComplexityLimits            *ComplexityLimits           `yaml:"complexity_limits"`
-	DepthLimit                  *QueryDepthConfiguration    `yaml:"depth_limit"`
 }
 
 type QueryDepthConfiguration struct {
@@ -391,8 +359,8 @@ type ComplexityLimit struct {
 	IgnorePersistedOperations bool `yaml:"ignore_persisted_operations,omitempty" envDefault:"false"`
 }
 
-func (c *ComplexityLimit) ApplyLimit(isPersistent bool) bool {
-	return c.Enabled && (!isPersistent || isPersistent && !c.IgnorePersistedOperations)
+func (c *ComplexityLimit) ApplyLimit() bool {
+	return c.Enabled
 }
 
 type OverrideRoutingURLConfiguration struct {
@@ -471,11 +439,6 @@ type RateLimitSimpleStrategy struct {
 	HideStatsFromResponseExtension bool          `yaml:"hide_stats_from_response_extension" envDefault:"false" env:"RATE_LIMIT_SIMPLE_HIDE_STATS_FROM_RESPONSE_EXTENSION"`
 }
 
-type CDNConfiguration struct {
-	URL       string      `yaml:"url" env:"CDN_URL" envDefault:"https://cosmo-cdn.wundergraph.com"`
-	CacheSize BytesString `yaml:"cache_size,omitempty" env:"CDN_CACHE_SIZE" envDefault:"100MB"`
-}
-
 type NatsTokenBasedAuthentication struct {
 	Token *string `yaml:"token,omitempty"`
 }
@@ -537,10 +500,6 @@ type AbsintheProtocolConfiguration struct {
 	// even if the Sub-protocol is not set to "absinthe"
 	// Legacy clients might not set the Sub-protocol Header, so this is a fallback
 	HandlerPath string `yaml:"handler_path" envDefault:"/absinthe/socket" env:"WEBSOCKETS_ABSINTHE_HANDLER_PATH"`
-}
-
-type ComplianceConfig struct {
-	AnonymizeIP AnonymizeIpConfiguration `yaml:"anonymize_ip,omitempty"`
 }
 
 type ExportTokenConfiguration struct {
@@ -631,41 +590,9 @@ type SubgraphErrorPropagationConfiguration struct {
 	AllowedFields          []string                     `yaml:"allowed_fields" env:"SUBGRAPH_ERROR_PROPAGATION_ALLOWED_FIELDS"`
 }
 
-type StorageProviders struct {
-	S3    []S3StorageProvider    `yaml:"s3,omitempty"`
-	CDN   []BaseStorageProvider  `yaml:"cdn,omitempty"`
-	Redis []RedisStorageProvider `yaml:"redis,omitempty"`
-}
-
-type PersistedOperationsStorageConfig struct {
-	ProviderID   string `yaml:"provider_id,omitempty" env:"PERSISTED_OPERATIONS_STORAGE_PROVIDER_ID"`
-	ObjectPrefix string `yaml:"object_prefix,omitempty" env:"PERSISTED_OPERATIONS_STORAGE_OBJECT_PREFIX"`
-}
-
 type AutomaticPersistedQueriesStorageConfig struct {
 	ProviderID   string `yaml:"provider_id,omitempty" env:"APQ_STORAGE_PROVIDER_ID"`
 	ObjectPrefix string `yaml:"object_prefix,omitempty" env:"APQ_STORAGE_OBJECT_PREFIX"`
-}
-
-type S3StorageProvider struct {
-	ID        string `yaml:"id,omitempty"`
-	Endpoint  string `yaml:"endpoint,omitempty"`
-	AccessKey string `yaml:"access_key,omitempty"`
-	SecretKey string `yaml:"secret_key,omitempty"`
-	Bucket    string `yaml:"bucket,omitempty"`
-	Region    string `yaml:"region,omitempty"`
-	Secure    bool   `yaml:"secure,omitempty"`
-}
-
-type BaseStorageProvider struct {
-	ID  string `yaml:"id,omitempty"`
-	URL string `yaml:"url,omitempty" envDefault:"https://cosmo-cdn.wundergraph.com"`
-}
-
-type RedisStorageProvider struct {
-	ID             string   `yaml:"id,omitempty" env:"STORAGE_PROVIDER_REDIS_ID"`
-	URLs           []string `yaml:"urls,omitempty" env:"STORAGE_PROVIDER_REDIS_URLS"`
-	ClusterEnabled bool     `yaml:"cluster_enabled,omitempty" envDefault:"false" env:"STORAGE_PROVIDER_REDIS_CLUSTER_ENABLED"`
 }
 
 type PersistedOperationsCDNProvider struct {
@@ -695,30 +622,9 @@ type ExecutionConfig struct {
 	FallbackStorage FallbackExecutionConfigStorage `yaml:"fallback_storage,omitempty" envPrefix:"EXECUTION_CONFIG_FALLBACK_STORAGE_"`
 }
 
-type PersistedOperationsCacheConfig struct {
-	Size BytesString `yaml:"size,omitempty" env:"PERSISTED_OPERATIONS_CACHE_SIZE" envDefault:"100MB"`
-}
-
 type AutomaticPersistedQueriesCacheConfig struct {
 	Size BytesString `yaml:"size,omitempty" env:"APQ_CACHE_SIZE" envDefault:"100MB"`
 	TTL  int         `yaml:"ttl" env:"APQ_CACHE_TTL" envDefault:"-1"`
-}
-
-type PersistedOperationsConfig struct {
-	LogUnknown bool                             `yaml:"log_unknown" env:"PERSISTED_OPERATIONS_LOG_UNKNOWN" envDefault:"false"`
-	Safelist   SafelistConfiguration            `yaml:"safelist" envPrefix:"PERSISTED_OPERATIONS_SAFELIST_"`
-	Cache      PersistedOperationsCacheConfig   `yaml:"cache"`
-	Storage    PersistedOperationsStorageConfig `yaml:"storage"`
-}
-
-type SafelistConfiguration struct {
-	Enabled bool `yaml:"enabled" envDefault:"false" env:"ENABLED"`
-}
-
-type AutomaticPersistedQueriesConfig struct {
-	Enabled bool                                   `yaml:"enabled" env:"APQ_ENABLED" envDefault:"false"`
-	Cache   AutomaticPersistedQueriesCacheConfig   `yaml:"cache"`
-	Storage AutomaticPersistedQueriesStorageConfig `yaml:"storage"`
 }
 
 type AccessLogsConfig struct {
@@ -836,72 +742,49 @@ type CacheWarmupConfiguration struct {
 }
 
 type Config struct {
-	Version string `yaml:"version,omitempty" ignored:"true"`
-
-	InstanceID     string             `yaml:"instance_id,omitempty" env:"INSTANCE_ID"`
-	Graph          Graph              `yaml:"graph,omitempty"`
-	Telemetry      Telemetry          `yaml:"telemetry,omitempty"`
-	GraphqlMetrics GraphqlMetrics     `yaml:"graphql_metrics,omitempty"`
-	CORS           CORS               `yaml:"cors,omitempty"`
-	Cluster        Cluster            `yaml:"cluster,omitempty"`
-	Compliance     ComplianceConfig   `yaml:"compliance,omitempty"`
-	TLS            TLSConfiguration   `yaml:"tls,omitempty"`
-	CacheControl   CacheControlPolicy `yaml:"cache_control_policy"`
-
-	Modules        map[string]interface{} `yaml:"modules,omitempty"`
-	Headers        HeaderRules            `yaml:"headers,omitempty"`
-	TrafficShaping TrafficShapingRules    `yaml:"traffic_shaping,omitempty"`
-	FileUpload     FileUpload             `yaml:"file_upload,omitempty"`
-	AccessLogs     AccessLogsConfig       `yaml:"access_logs,omitempty"`
-
-	ListenAddr                    string                      `yaml:"listen_addr" envDefault:"localhost:3002" env:"LISTEN_ADDR"`
-	ControlplaneURL               string                      `yaml:"controlplane_url" envDefault:"https://cosmo-cp.wundergraph.com" env:"CONTROLPLANE_URL"`
-	PlaygroundConfig              PlaygroundConfig            `yaml:"playground,omitempty"`
-	PlaygroundEnabled             bool                        `yaml:"playground_enabled" envDefault:"true" env:"PLAYGROUND_ENABLED"`
-	IntrospectionEnabled          bool                        `yaml:"introspection_enabled" envDefault:"true" env:"INTROSPECTION_ENABLED"`
-	QueryPlansEnabled             bool                        `yaml:"query_plans_enabled" envDefault:"true" env:"QUERY_PLANS_ENABLED"`
-	LogLevel                      string                      `yaml:"log_level" envDefault:"info" env:"LOG_LEVEL"`
-	JSONLog                       bool                        `yaml:"json_log" envDefault:"true" env:"JSON_LOG"`
-	ShutdownDelay                 time.Duration               `yaml:"shutdown_delay" envDefault:"60s" env:"SHUTDOWN_DELAY"`
-	GracePeriod                   time.Duration               `yaml:"grace_period" envDefault:"30s" env:"GRACE_PERIOD"`
-	PollInterval                  time.Duration               `yaml:"poll_interval" envDefault:"10s" env:"POLL_INTERVAL"`
-	PollJitter                    time.Duration               `yaml:"poll_jitter" envDefault:"5s" env:"POLL_JITTER"`
-	HealthCheckPath               string                      `yaml:"health_check_path" envDefault:"/health" env:"HEALTH_CHECK_PATH"`
-	ReadinessCheckPath            string                      `yaml:"readiness_check_path" envDefault:"/health/ready" env:"READINESS_CHECK_PATH"`
-	LivenessCheckPath             string                      `yaml:"liveness_check_path" envDefault:"/health/live" env:"LIVENESS_CHECK_PATH"`
-	GraphQLPath                   string                      `yaml:"graphql_path" envDefault:"/graphql" env:"GRAPHQL_PATH"`
-	PlaygroundPath                string                      `yaml:"playground_path" envDefault:"/" env:"PLAYGROUND_PATH"`
-	Authentication                AuthenticationConfiguration `yaml:"authentication,omitempty"`
-	Authorization                 AuthorizationConfiguration  `yaml:"authorization,omitempty"`
-	RateLimit                     RateLimitConfiguration      `yaml:"rate_limit,omitempty"`
-	LocalhostFallbackInsideDocker bool                        `yaml:"localhost_fallback_inside_docker" envDefault:"true" env:"LOCALHOST_FALLBACK_INSIDE_DOCKER"`
-	CDN                           CDNConfiguration            `yaml:"cdn,omitempty"`
-	DevelopmentMode               bool                        `yaml:"dev_mode" envDefault:"false" env:"DEV_MODE"`
-	Events                        EventsConfiguration         `yaml:"events,omitempty"`
-	CacheWarmup                   CacheWarmupConfiguration    `yaml:"cache_warmup,omitempty"`
-
-	RouterConfigPath   string `yaml:"router_config_path,omitempty" env:"ROUTER_CONFIG_PATH"`
-	RouterRegistration bool   `yaml:"router_registration" env:"ROUTER_REGISTRATION" envDefault:"true"`
-
-	OverrideRoutingURL OverrideRoutingURLConfiguration `yaml:"override_routing_url"`
-
-	Overrides OverridesConfiguration `yaml:"overrides"`
-
-	SecurityConfiguration SecurityConfiguration `yaml:"security,omitempty"`
-
-	EngineExecutionConfiguration EngineExecutionConfiguration `yaml:"engine"`
-
-	WebSocket WebSocketConfiguration `yaml:"websocket,omitempty"`
-
-	SubgraphErrorPropagation SubgraphErrorPropagationConfiguration `yaml:"subgraph_error_propagation"`
-
-	StorageProviders               StorageProviders                `yaml:"storage_providers"`
-	ExecutionConfig                ExecutionConfig                 `yaml:"execution_config"`
-	PersistedOperationsConfig      PersistedOperationsConfig       `yaml:"persisted_operations"`
-	AutomaticPersistedQueries      AutomaticPersistedQueriesConfig `yaml:"automatic_persisted_queries"`
-	ApolloCompatibilityFlags       ApolloCompatibilityFlags        `yaml:"apollo_compatibility_flags"`
-	ApolloRouterCompatibilityFlags ApolloRouterCompatibilityFlags  `yaml:"apollo_router_compatibility_flags"`
-	ClientHeader                   ClientHeader                    `yaml:"client_header"`
+	Version                        string                                `yaml:"version,omitempty" ignored:"true"`
+	InstanceID                     string                                `yaml:"instance_id,omitempty" env:"INSTANCE_ID"`
+	Telemetry                      Telemetry                             `yaml:"telemetry,omitempty"`
+	Cluster                        Cluster                               `yaml:"cluster,omitempty"`
+	TLS                            TLSConfiguration                      `yaml:"tls,omitempty"`
+	CacheControl                   CacheControlPolicy                    `yaml:"cache_control_policy"`
+	Modules                        map[string]interface{}                `yaml:"modules,omitempty"`
+	Headers                        HeaderRules                           `yaml:"headers,omitempty"`
+	TrafficShaping                 TrafficShapingRules                   `yaml:"traffic_shaping,omitempty"`
+	AccessLogs                     AccessLogsConfig                      `yaml:"access_logs,omitempty"`
+	ListenAddr                     string                                `yaml:"listen_addr" envDefault:"localhost:3002" env:"LISTEN_ADDR"`
+	ControlplaneURL                string                                `yaml:"controlplane_url" envDefault:"https://cosmo-cp.wundergraph.com" env:"CONTROLPLANE_URL"`
+	PlaygroundConfig               PlaygroundConfig                      `yaml:"playground,omitempty"`
+	PlaygroundEnabled              bool                                  `yaml:"playground_enabled" envDefault:"true" env:"PLAYGROUND_ENABLED"`
+	IntrospectionEnabled           bool                                  `yaml:"introspection_enabled" envDefault:"true" env:"INTROSPECTION_ENABLED"`
+	QueryPlansEnabled              bool                                  `yaml:"query_plans_enabled" envDefault:"true" env:"QUERY_PLANS_ENABLED"`
+	LogLevel                       string                                `yaml:"log_level" envDefault:"info" env:"LOG_LEVEL"`
+	JSONLog                        bool                                  `yaml:"json_log" envDefault:"true" env:"JSON_LOG"`
+	ShutdownDelay                  time.Duration                         `yaml:"shutdown_delay" envDefault:"60s" env:"SHUTDOWN_DELAY"`
+	GracePeriod                    time.Duration                         `yaml:"grace_period" envDefault:"30s" env:"GRACE_PERIOD"`
+	PollInterval                   time.Duration                         `yaml:"poll_interval" envDefault:"10s" env:"POLL_INTERVAL"`
+	PollJitter                     time.Duration                         `yaml:"poll_jitter" envDefault:"5s" env:"POLL_JITTER"`
+	HealthCheckPath                string                                `yaml:"health_check_path" envDefault:"/health" env:"HEALTH_CHECK_PATH"`
+	ReadinessCheckPath             string                                `yaml:"readiness_check_path" envDefault:"/health/ready" env:"READINESS_CHECK_PATH"`
+	LivenessCheckPath              string                                `yaml:"liveness_check_path" envDefault:"/health/live" env:"LIVENESS_CHECK_PATH"`
+	GraphQLPath                    string                                `yaml:"graphql_path" envDefault:"/graphql" env:"GRAPHQL_PATH"`
+	PlaygroundPath                 string                                `yaml:"playground_path" envDefault:"/" env:"PLAYGROUND_PATH"`
+	Authentication                 AuthenticationConfiguration           `yaml:"authentication,omitempty"`
+	Authorization                  AuthorizationConfiguration            `yaml:"authorization,omitempty"`
+	RateLimit                      RateLimitConfiguration                `yaml:"rate_limit,omitempty"`
+	LocalhostFallbackInsideDocker  bool                                  `yaml:"localhost_fallback_inside_docker" envDefault:"true" env:"LOCALHOST_FALLBACK_INSIDE_DOCKER"`
+	DevelopmentMode                bool                                  `yaml:"dev_mode" envDefault:"false" env:"DEV_MODE"`
+	Events                         EventsConfiguration                   `yaml:"events,omitempty"`
+	RouterConfigPath               string                                `yaml:"router_config_path,omitempty" env:"ROUTER_CONFIG_PATH"`
+	OverrideRoutingURL             OverrideRoutingURLConfiguration       `yaml:"override_routing_url"`
+	Overrides                      OverridesConfiguration                `yaml:"overrides"`
+	EngineExecutionConfiguration   EngineExecutionConfiguration          `yaml:"engine"`
+	WebSocket                      WebSocketConfiguration                `yaml:"websocket,omitempty"`
+	SubgraphErrorPropagation       SubgraphErrorPropagationConfiguration `yaml:"subgraph_error_propagation"`
+	ExecutionConfig                ExecutionConfig                       `yaml:"execution_config"`
+	ApolloCompatibilityFlags       ApolloCompatibilityFlags              `yaml:"apollo_compatibility_flags"`
+	ApolloRouterCompatibilityFlags ApolloRouterCompatibilityFlags        `yaml:"apollo_router_compatibility_flags"`
+	ClientHeader                   ClientHeader                          `yaml:"client_header"`
 }
 
 type PlaygroundConfig struct {

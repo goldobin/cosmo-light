@@ -73,8 +73,6 @@ type HandlerOptions struct {
 	EngineStats                                 statistics.EngineStatistics
 	TracerProvider                              trace.TracerProvider
 	Authorizer                                  *CosmoAuthorizer
-	RateLimiter                                 *CosmoRateLimiter
-	RateLimitConfig                             *config.RateLimitConfiguration
 	SubgraphErrorPropagation                    config.SubgraphErrorPropagationConfiguration
 	EngineLoaderHooks                           resolve.LoaderHooks
 	ApolloSubscriptionMultipartPrintBoundary    bool
@@ -94,8 +92,6 @@ func NewGraphQLHandler(opts HandlerOptions) *GraphQLHandler {
 			trace.WithInstrumentationVersion("0.0.1"),
 		),
 		authorizer:                               opts.Authorizer,
-		rateLimiter:                              opts.RateLimiter,
-		rateLimitConfig:                          opts.RateLimitConfig,
 		subgraphErrorPropagation:                 opts.SubgraphErrorPropagation,
 		engineLoaderHooks:                        opts.EngineLoaderHooks,
 		apolloSubscriptionMultipartPrintBoundary: opts.ApolloSubscriptionMultipartPrintBoundary,
@@ -114,14 +110,11 @@ func NewGraphQLHandler(opts HandlerOptions) *GraphQLHandler {
 // https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#response
 
 type GraphQLHandler struct {
-	log         *zap.Logger
-	executor    *Executor
-	engineStats statistics.EngineStatistics
-	tracer      trace.Tracer
-	authorizer  *CosmoAuthorizer
-	rateLimiter *CosmoRateLimiter
-
-	rateLimitConfig          *config.RateLimitConfiguration
+	log                      *zap.Logger
+	executor                 *Executor
+	engineStats              statistics.EngineStatistics
+	tracer                   trace.Tracer
+	authorizer               *CosmoAuthorizer
 	subgraphErrorPropagation config.SubgraphErrorPropagationConfiguration
 	engineLoaderHooks        resolve.LoaderHooks
 
@@ -129,8 +122,7 @@ type GraphQLHandler struct {
 	enablePersistedOperationCacheResponseHeader bool
 	enableNormalizationCacheResponseHeader      bool
 	enableResponseHeaderPropagation             bool
-
-	apolloSubscriptionMultipartPrintBoundary bool
+	apolloSubscriptionMultipartPrintBoundary    bool
 }
 
 func (h *GraphQLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -164,7 +156,6 @@ func (h *GraphQLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.engineLoaderHooks != nil {
 		ctx.SetEngineLoaderHooks(h.engineLoaderHooks)
 	}
-	ctx = h.configureRateLimiting(ctx)
 
 	switch p := requestContext.operation.preparedPlan.preparedPlan.(type) {
 	case *plan.SynchronousResponsePlan:
@@ -234,36 +225,6 @@ func (h *GraphQLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *GraphQLHandler) configureRateLimiting(ctx *resolve.Context) *resolve.Context {
-	if h.rateLimiter == nil {
-		return ctx
-	}
-	if h.rateLimitConfig == nil {
-		return ctx
-	}
-	if !h.rateLimitConfig.Enabled {
-		return ctx
-	}
-	if h.rateLimitConfig.Strategy != "simple" {
-		return ctx
-	}
-	ctx.SetRateLimiter(h.rateLimiter)
-	ctx.RateLimitOptions = resolve.RateLimitOptions{
-		Enable:                          true,
-		IncludeStatsInResponseExtension: !h.rateLimitConfig.SimpleStrategy.HideStatsFromResponseExtension,
-		Rate:                            h.rateLimitConfig.SimpleStrategy.Rate,
-		Burst:                           h.rateLimitConfig.SimpleStrategy.Burst,
-		Period:                          h.rateLimitConfig.SimpleStrategy.Period,
-		RateLimitKey:                    h.rateLimitConfig.Storage.KeyPrefix,
-		RejectExceedingRequests:         h.rateLimitConfig.SimpleStrategy.RejectExceedingRequests,
-		ErrorExtensionCode: resolve.RateLimitErrorExtensionCode{
-			Enabled: h.rateLimitConfig.ErrorExtensionCode.Enabled,
-			Code:    h.rateLimitConfig.ErrorExtensionCode.Code,
-		},
-	}
-	return WithRateLimiterStats(ctx)
-}
-
 // WriteError writes the error to the response writer. This function must be concurrency-safe.
 // @TODO This function should be refactored to be a helper function for websocket and http error writing
 // In the websocket case, we call this function concurrently as part of the polling loop. This is error-prone.
@@ -291,30 +252,6 @@ func (h *GraphQLHandler) WriteError(ctx *resolve.Context, err error, res *resolv
 			return
 		}
 		response.Errors[0].Message = errMerge.Error()
-	case errorTypeRateLimit:
-		response.Errors[0].Message = "Rate limit exceeded"
-		if h.rateLimitConfig.ErrorExtensionCode.Enabled {
-			response.Errors[0].Extensions = &Extensions{
-				Code: h.rateLimitConfig.ErrorExtensionCode.Code,
-			}
-		}
-		if !h.rateLimitConfig.SimpleStrategy.HideStatsFromResponseExtension {
-			buf := bytes.NewBuffer(make([]byte, 0, 1024))
-			err = h.rateLimiter.RenderResponseExtension(ctx, buf)
-			if err != nil {
-				requestLogger.Error("unable to render rate limit stats", zap.Error(err))
-				if isHttpResponseWriter {
-					httpWriter.WriteHeader(http.StatusInternalServerError)
-				}
-				return
-			}
-			response.Extensions = &Extensions{
-				RateLimit: buf.Bytes(),
-			}
-		}
-		if isHttpResponseWriter {
-			httpWriter.WriteHeader(h.rateLimiter.RejectStatusCode())
-		}
 	case errorTypeUnauthorized:
 		response.Errors[0].Message = "Unauthorized"
 		if h.authorizer.HasResponseExtensionData(ctx) {

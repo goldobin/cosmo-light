@@ -8,15 +8,14 @@ import (
 )
 
 type accessLogger struct {
-	timeFormat            string
-	utc                   bool
-	skipPaths             []string
-	ipAnonymizationConfig *IPAnonymizationConfig
-	traceID               bool // optionally log Open Telemetry TraceID
-	fieldsHandler         ContextFunc
-	baseFields            []zapcore.Field
-	attributes            []config.CustomAttribute
-	exprAttributes        []ExpressionAttribute
+	timeFormat     string
+	utc            bool
+	skipPaths      []string
+	traceID        bool // optionally log Open Telemetry TraceID
+	fieldsHandler  ContextFunc
+	baseFields     []zapcore.Field
+	attributes     []config.CustomAttribute
+	exprAttributes []ExpressionAttribute
 }
 
 type SubgraphAccessLogger struct {
@@ -25,26 +24,24 @@ type SubgraphAccessLogger struct {
 }
 
 type SubgraphOptions struct {
-	IPAnonymizationConfig *IPAnonymizationConfig
-	FieldsHandler         ContextFunc
-	Fields                []zapcore.Field
-	Attributes            []config.CustomAttribute
+	FieldsHandler ContextFunc
+	Fields        []zapcore.Field
+	Attributes    []config.CustomAttribute
 }
 
 func NewSubgraphAccessLogger(logger *zap.Logger, opts SubgraphOptions) *SubgraphAccessLogger {
 	return &SubgraphAccessLogger{
 		logger: logger.With(zap.String("log_type", "client/subgraph")),
 		accessLogger: &accessLogger{
-			baseFields:            opts.Fields,
-			ipAnonymizationConfig: opts.IPAnonymizationConfig,
-			traceID:               true,
-			fieldsHandler:         opts.FieldsHandler,
-			attributes:            opts.Attributes,
+			baseFields:    opts.Fields,
+			traceID:       true,
+			fieldsHandler: opts.FieldsHandler,
+			attributes:    opts.Attributes,
 		},
 	}
 }
 
-func (h *SubgraphAccessLogger) RequestFields(respInfo *resolve.ResponseInfo, subgraphFields []zap.Field) []zap.Field {
+func (h *SubgraphAccessLogger) RequestFields(respInfo *resolve.ResponseInfo) []zap.Field {
 	if respInfo == nil {
 		return []zap.Field{}
 	}

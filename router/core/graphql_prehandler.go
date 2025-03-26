@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -15,12 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"go.opentelemetry.io/otel/codes"
-
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
 	"go.opentelemetry.io/otel/attribute"
-	otelmetric "go.opentelemetry.io/otel/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -33,7 +29,6 @@ import (
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/graphqlerrors"
 
 	"github.com/wundergraph/cosmo/router/internal/expr"
-	"github.com/wundergraph/cosmo/router/internal/persistedoperation"
 	"github.com/wundergraph/cosmo/router/pkg/art"
 	"github.com/wundergraph/cosmo/router/pkg/config"
 	"github.com/wundergraph/cosmo/router/pkg/otel"
@@ -43,19 +38,14 @@ import (
 type PreHandlerOptions struct {
 	Logger             *zap.Logger
 	Executor           *Executor
-	Metrics            RouterMetrics
 	OperationProcessor *OperationProcessor
 	Planner            *OperationPlanner
 	AccessController   *AccessController
-	OperationBlocker   *OperationBlocker
 	RouterPublicKey    *ecdsa.PublicKey
 	TracerProvider     *sdktrace.TracerProvider
 	ComplexityLimits   *config.ComplexityLimits
-	MaxUploadFiles     int
-	MaxUploadFileSize  int
 
 	FlushTelemetryAfterResponse bool
-	FileUploadEnabled           bool
 	TraceExportVariables        bool
 	DevelopmentMode             bool
 	EnableRequestTracing        bool
@@ -63,7 +53,6 @@ type PreHandlerOptions struct {
 	AlwaysSkipLoader            bool
 	QueryPlansEnabled           bool
 	QueryPlansLoggingEnabled    bool
-	TrackSchemaUsageInfo        bool
 	ClientHeader                config.ClientHeader
 	ComputeOperationSha256      bool
 	ApolloCompatibilityFlags    *config.ApolloCompatibilityFlags
@@ -74,11 +63,9 @@ type PreHandlerOptions struct {
 type PreHandler struct {
 	log                         *zap.Logger
 	executor                    *Executor
-	metrics                     RouterMetrics
 	operationProcessor          *OperationProcessor
 	planner                     *OperationPlanner
 	accessController            *AccessController
-	operationBlocker            *OperationBlocker
 	developmentMode             bool
 	alwaysIncludeQueryPlan      bool
 	alwaysSkipLoader            bool
@@ -90,9 +77,6 @@ type PreHandler struct {
 	flushTelemetryAfterResponse bool
 	tracer                      trace.Tracer
 	traceExportVariables        bool
-	fileUploadEnabled           bool
-	maxUploadFiles              int
-	maxUploadFileSize           int
 	complexityLimits            *config.ComplexityLimits
 	trackSchemaUsageInfo        bool
 	clientHeader                config.ClientHeader
@@ -104,24 +88,21 @@ type PreHandler struct {
 }
 
 type httpOperation struct {
-	requestContext   *requestContext
-	body             []byte
-	files            []*httpclient.FileUpload
-	requestLogger    *zap.Logger
-	routerSpan       trace.Span
-	operationMetrics *OperationMetrics
-	traceTimings     *art.TraceTimings
+	requestContext *requestContext
+	body           []byte
+	files          []*httpclient.FileUpload
+	requestLogger  *zap.Logger
+	routerSpan     trace.Span
+	traceTimings   *art.TraceTimings
 }
 
 func NewPreHandler(opts *PreHandlerOptions) *PreHandler {
 	return &PreHandler{
 		log:                         opts.Logger,
 		executor:                    opts.Executor,
-		metrics:                     opts.Metrics,
 		operationProcessor:          opts.OperationProcessor,
 		planner:                     opts.Planner,
 		accessController:            opts.AccessController,
-		operationBlocker:            opts.OperationBlocker,
 		routerPublicKey:             opts.RouterPublicKey,
 		developmentMode:             opts.DevelopmentMode,
 		enableRequestTracing:        opts.EnableRequestTracing,
@@ -132,15 +113,11 @@ func NewPreHandler(opts *PreHandlerOptions) *PreHandler {
 			"wundergraph/cosmo/router/pre_handler",
 			trace.WithInstrumentationVersion("0.0.1"),
 		),
-		fileUploadEnabled:         opts.FileUploadEnabled,
-		maxUploadFiles:            opts.MaxUploadFiles,
-		maxUploadFileSize:         opts.MaxUploadFileSize,
 		complexityLimits:          opts.ComplexityLimits,
 		alwaysIncludeQueryPlan:    opts.AlwaysIncludeQueryPlan,
 		alwaysSkipLoader:          opts.AlwaysSkipLoader,
 		queryPlansEnabled:         opts.QueryPlansEnabled,
 		queryPlansLoggingEnabled:  opts.QueryPlansLoggingEnabled,
-		trackSchemaUsageInfo:      opts.TrackSchemaUsageInfo,
 		clientHeader:              opts.ClientHeader,
 		computeOperationSha256:    opts.ComputeOperationSha256,
 		apolloCompatibilityFlags:  opts.ApolloCompatibilityFlags,
@@ -172,10 +149,6 @@ func (h *PreHandler) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		var (
-			// In GraphQL the statusCode does not always express the error state of the request
-			// we use this flag to determine if we have an error for the request metrics
-			writtenBytes int
-			statusCode   = http.StatusOK
 			traceTimings *art.TraceTimings
 		)
 
@@ -194,13 +167,6 @@ func (h *PreHandler) Handler(next http.Handler) http.Handler {
 
 		startAttrs := *requestContext.telemetry.AcquireAttributes()
 		startAttrs = append(startAttrs, requestContext.telemetry.metricAttrs...)
-
-		metrics := h.metrics.StartOperation(
-			requestLogger,
-			r.ContentLength,
-			requestContext.telemetry.metricSliceAttrs,
-			otelmetric.WithAttributeSet(attribute.NewSet(startAttrs...)),
-		)
 
 		requestContext.telemetry.ReleaseAttributes(&startAttrs)
 
@@ -236,13 +202,6 @@ func (h *PreHandler) Handler(next http.Handler) http.Handler {
 			requestContext.telemetry.AddCustomMetricStringSliceAttr(ContextFieldOperationServices, requestContext.dataSourceNames)
 			requestContext.telemetry.AddCustomMetricStringSliceAttr(ContextFieldGraphQLErrorCodes, requestContext.graphQLErrorCodes)
 
-			metrics.Finish(
-				requestContext,
-				statusCode,
-				writtenBytes,
-				h.flushTelemetryAfterResponse,
-			)
-
 			if h.flushTelemetryAfterResponse {
 				h.flushMetrics(r.Context(), requestLogger)
 			}
@@ -268,48 +227,12 @@ func (h *PreHandler) Handler(next http.Handler) http.Handler {
 		var files []*httpclient.FileUpload
 
 		if strings.Contains(r.Header.Get("Content-Type"), "multipart/form-data") {
-			if !h.fileUploadEnabled {
-				requestContext.SetError(&httpGraphqlError{
-					message:    "file upload disabled",
-					statusCode: http.StatusOK,
-				})
-				writeOperationError(r, w, requestLogger, requestContext.error)
-				return
-			}
-
-			_, readMultiPartSpan := h.tracer.Start(r.Context(), "HTTP - Read Multipart",
-				trace.WithSpanKind(trace.SpanKindInternal),
-				trace.WithAttributes(requestContext.telemetry.traceAttrs...),
-			)
-
-			multipartParser := NewMultipartParser(h.operationProcessor, h.maxUploadFiles, h.maxUploadFileSize)
-
-			var err error
-			body, files, err = multipartParser.Parse(r, h.getBodyReadBuffer(r.ContentLength))
-			// We set it before the error so that users could log the body if it exists in case of an error
-			if h.exprManager.VisitorManager.IsBodyUsedInExpressions() {
-				requestContext.expressionContext.Request.Body.Raw = string(body)
-			}
-			if err != nil {
-				requestContext.SetError(err)
-				writeOperationError(r, w, requestLogger, requestContext.error)
-				readMultiPartSpan.End()
-				return
-			}
-
-			readMultiPartSpan.SetAttributes(
-				otel.HTTPRequestUploadFileCount.Int(len(files)),
-			)
-
-			readMultiPartSpan.End()
-
-			// Cleanup all files. Needs to be called in the pre_handler function to ensure that
-			// defer is called after the response is written
-			defer func() {
-				if err := multipartParser.RemoveAll(); err != nil {
-					requestLogger.Error("Failed to remove files after multipart request", zap.Error(err))
-				}
-			}()
+			requestContext.SetError(&httpGraphqlError{
+				message:    "file upload not supported",
+				statusCode: http.StatusOK,
+			})
+			writeOperationError(r, w, requestLogger, requestContext.error)
+			return
 		} else if r.Method == http.MethodPost {
 			_, readOperationBodySpan := h.tracer.Start(r.Context(), "HTTP - Read Body",
 				trace.WithSpanKind(trace.SpanKindInternal),
@@ -394,13 +317,12 @@ func (h *PreHandler) Handler(next http.Handler) http.Handler {
 		}
 
 		err = h.handleOperation(r, variablesParser, &httpOperation{
-			requestContext:   requestContext,
-			requestLogger:    requestLogger,
-			routerSpan:       routerSpan,
-			operationMetrics: metrics,
-			traceTimings:     traceTimings,
-			files:            files,
-			body:             body,
+			requestContext: requestContext,
+			requestLogger:  requestLogger,
+			routerSpan:     routerSpan,
+			traceTimings:   traceTimings,
+			files:          files,
+			body:           body,
 		})
 		if err != nil {
 			requestContext.SetError(err)
@@ -437,9 +359,6 @@ func (h *PreHandler) Handler(next http.Handler) http.Handler {
 		// and enrich the context to make it available in the request context as well for metrics etc.
 		next.ServeHTTP(ww, r)
 
-		statusCode = ww.Status()
-		writtenBytes = ww.BytesWritten()
-
 		// Mark the root span of the router as failed, so we can easily identify failed requests
 		if requestContext.error != nil {
 			rtrace.AttachErrToSpan(trace.SpanFromContext(r.Context()), requestContext.error)
@@ -447,21 +366,8 @@ func (h *PreHandler) Handler(next http.Handler) http.Handler {
 	})
 }
 
-func (h *PreHandler) shouldComputeOperationSha256(operationKit *OperationKit) bool {
-	if h.computeOperationSha256 {
-		return true
-	}
-	hasPersistedHash := operationKit.parsedOperation.GraphQLRequestExtensions.PersistedQuery != nil && operationKit.parsedOperation.GraphQLRequestExtensions.PersistedQuery.Sha256Hash != ""
-	// If it already has a persisted hash attached to the request, then there is no need for us to compute it anew
-	// Otherwise, we only want to compute the hash (an expensive operation) if we're safelisting or logging unknown persisted operations
-	return !hasPersistedHash && (h.operationBlocker.SafelistEnabled || h.operationBlocker.LogUnknownOperationsEnabled)
-}
-
-// shouldFetchPersistedOperation determines if we should fetch a persisted operation. The most intuitive case is if the
-// operation is a persisted operation. However, we also want to fetch persisted operations if we're enabling safelisting
-// and if we're logging unknown operations. This is because we want to check if the operation is already persisted in the cache
-func (h *PreHandler) shouldFetchPersistedOperation(operationKit *OperationKit) bool {
-	return operationKit.parsedOperation.IsPersistedOperation || h.operationBlocker.SafelistEnabled || h.operationBlocker.LogUnknownOperationsEnabled
+func (h *PreHandler) shouldComputeOperationSha256() bool {
+	return h.computeOperationSha256
 }
 
 func (h *PreHandler) handleOperation(req *http.Request, variablesParser *astjson.Parser, httpOperation *httpOperation) error {
@@ -474,7 +380,6 @@ func (h *PreHandler) handleOperation(req *http.Request, variablesParser *astjson
 		// the kit must be freed before we're doing io operations
 		// the kit is bound to the number of CPUs, and we must not hold onto it while doing IO operations
 		// it needs to be called inside a defer to ensure it is called in panic situations as well
-
 		if operationKit != nil {
 			operationKit.Free()
 		}
@@ -505,7 +410,7 @@ func (h *PreHandler) handleOperation(req *http.Request, variablesParser *astjson
 	}
 
 	// Compute the operation sha256 hash as soon as possible for observability reasons
-	if h.shouldComputeOperationSha256(operationKit) {
+	if h.shouldComputeOperationSha256() {
 		if err := operationKit.ComputeOperationSha256(); err != nil {
 			return &httpGraphqlError{
 				message:    fmt.Sprintf("error hashing operation: %s", err),
@@ -514,12 +419,6 @@ func (h *PreHandler) handleOperation(req *http.Request, variablesParser *astjson
 		}
 		requestContext.operation.sha256Hash = operationKit.parsedOperation.Sha256Hash
 		requestContext.telemetry.addCustomMetricStringAttr(ContextFieldOperationSha256, requestContext.operation.sha256Hash)
-		if h.operationBlocker.SafelistEnabled || h.operationBlocker.LogUnknownOperationsEnabled {
-			// Set the request hash to the parsed hash, to see if it matches a persisted operation
-			operationKit.parsedOperation.GraphQLRequestExtensions.PersistedQuery = &GraphQLRequestExtensionsPersistedQuery{
-				Sha256Hash: operationKit.parsedOperation.Sha256Hash,
-			}
-		}
 	}
 
 	requestContext.operation.extensions = operationKit.parsedOperation.Request.Extensions
@@ -533,38 +432,7 @@ func (h *PreHandler) handleOperation(req *http.Request, variablesParser *astjson
 
 	var (
 		skipParse bool
-		isApq     bool
 	)
-
-	if h.shouldFetchPersistedOperation(operationKit) {
-		ctx, span := h.tracer.Start(req.Context(), "Load Persisted Operation",
-			trace.WithSpanKind(trace.SpanKindClient),
-			trace.WithAttributes(requestContext.telemetry.traceAttrs...),
-		)
-
-		skipParse, isApq, err = operationKit.FetchPersistedOperation(ctx, requestContext.operation.clientInfo)
-		span.SetAttributes(otel.WgEnginePersistedOperationCacheHit.Bool(operationKit.parsedOperation.PersistedOperationCacheHit))
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-
-			var poNotFoundErr *persistedoperation.PersistentOperationNotFoundError
-			if h.operationBlocker.LogUnknownOperationsEnabled && errors.As(err, &poNotFoundErr) {
-				requestContext.logger.Warn("Unknown persisted operation found", zap.String("query", operationKit.parsedOperation.Request.Query), zap.String("sha256Hash", poNotFoundErr.Sha256Hash))
-				if h.operationBlocker.SafelistEnabled {
-					span.End()
-					return err
-				}
-			} else {
-				span.End()
-				return err
-			}
-		}
-
-		span.End()
-
-		requestContext.operation.persistedOperationCacheHit = operationKit.parsedOperation.PersistedOperationCacheHit
-	}
 
 	// If the persistent operation is already in the cache, we skip the parse step
 	// because the operation was already parsed. This is a performance optimization, and we
@@ -622,24 +490,6 @@ func (h *PreHandler) handleOperation(req *http.Request, variablesParser *astjson
 	// Set the operation name and type to the operation metrics and the router span as early as possible
 	httpOperation.routerSpan.SetAttributes(attributesAfterParse...)
 
-	if err := h.operationBlocker.OperationIsBlocked(requestContext.logger, requestContext.expressionContext, operationKit.parsedOperation); err != nil {
-		return &httpGraphqlError{
-			message:    err.Error(),
-			statusCode: http.StatusOK,
-		}
-	}
-
-	if operationKit.parsedOperation.GraphQLRequestExtensions.PersistedQuery != nil &&
-		operationKit.parsedOperation.GraphQLRequestExtensions.PersistedQuery.Sha256Hash != "" {
-
-		requestContext.operation.persistedID = operationKit.parsedOperation.GraphQLRequestExtensions.PersistedQuery.Sha256Hash
-		persistedIDAttribute := otel.WgOperationPersistedID.String(operationKit.parsedOperation.GraphQLRequestExtensions.PersistedQuery.Sha256Hash)
-
-		requestContext.telemetry.addCommonAttribute(persistedIDAttribute)
-
-		httpOperation.routerSpan.SetAttributes(persistedIDAttribute)
-	}
-
 	/**
 	* Normalize the operation
 	 */
@@ -655,7 +505,7 @@ func (h *PreHandler) handleOperation(req *http.Request, variablesParser *astjson
 		trace.WithAttributes(requestContext.telemetry.traceAttrs...),
 	)
 
-	cached, err := operationKit.NormalizeOperation(requestContext.operation.clientInfo.Name, isApq)
+	cached, err := operationKit.NormalizeOperation()
 	if err != nil {
 		rtrace.AttachErrToSpan(engineNormalizeSpan, err)
 
@@ -808,10 +658,6 @@ func (h *PreHandler) handleOperation(req *http.Request, variablesParser *astjson
 
 	engineNormalizeSpan.End()
 
-	if operationKit.parsedOperation.IsPersistedOperation {
-		engineNormalizeSpan.SetAttributes(otel.WgEnginePersistedOperationCacheHit.Bool(operationKit.parsedOperation.PersistedOperationCacheHit))
-	}
-
 	if h.traceExportVariables {
 		// At this stage the variables are normalized
 		httpOperation.routerSpan.SetAttributes(otel.WgOperationVariables.String(string(operationKit.parsedOperation.Request.Variables)))
@@ -861,7 +707,7 @@ func (h *PreHandler) handleOperation(req *http.Request, variablesParser *astjson
 	// Validate that the planned query doesn't exceed the maximum query depth configured
 	// This check runs if they've configured a max query depth, and it can optionally be turned off for persisted operations
 	if h.complexityLimits != nil {
-		cacheHit, complexityCalcs, queryDepthErr := operationKit.ValidateQueryComplexity(h.complexityLimits, operationKit.kit.doc, h.executor.RouterSchema, operationKit.parsedOperation.IsPersistedOperation)
+		cacheHit, complexityCalcs, queryDepthErr := operationKit.ValidateQueryComplexity(h.complexityLimits, operationKit.kit.doc, h.executor.RouterSchema)
 		engineValidateSpan.SetAttributes(otel.WgQueryDepth.Int(complexityCalcs.Depth))
 		engineValidateSpan.SetAttributes(otel.WgQueryTotalFields.Int(complexityCalcs.TotalFields))
 		engineValidateSpan.SetAttributes(otel.WgQueryRootFields.Int(complexityCalcs.RootFields))
@@ -935,13 +781,6 @@ func (h *PreHandler) handleOperation(req *http.Request, variablesParser *astjson
 	planningAttrs = append(planningAttrs, otel.WgEnginePlanCacheHit.Bool(requestContext.operation.planCacheHit))
 	planningAttrs = append(planningAttrs, requestContext.telemetry.metricAttrs...)
 
-	httpOperation.operationMetrics.routerMetrics.MetricStore().MeasureOperationPlanningTime(
-		req.Context(),
-		requestContext.operation.planningTime,
-		requestContext.telemetry.metricSliceAttrs,
-		otelmetric.WithAttributeSet(attribute.NewSet(planningAttrs...)),
-	)
-
 	requestContext.telemetry.ReleaseAttributes(&planningAttrs)
 
 	// we could log the query plan only if query plans are calculated
@@ -981,9 +820,6 @@ func (h *PreHandler) flushMetrics(ctx context.Context, requestLogger *zap.Logger
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := h.metrics.MetricStore().Flush(ctx); err != nil {
-			requestLogger.Error("Failed to flush OTEL metrics", zap.Error(err))
-		}
 	}()
 
 	wg.Add(1)

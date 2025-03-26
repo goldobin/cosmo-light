@@ -26,11 +26,10 @@ import (
 )
 
 type ExecutorConfigurationBuilder struct {
-	introspection  bool
-	trackUsageInfo bool
-	baseURL        string
-	transport      http.RoundTripper
-	logger         *zap.Logger
+	introspection bool
+	baseURL       string
+	transport     http.RoundTripper
+	logger        *zap.Logger
 
 	transportOptions *TransportOptions
 }
@@ -192,7 +191,6 @@ func (b *ExecutorConfigurationBuilder) Build(ctx context.Context, opts *Executor
 		RouterSchema:    &routerSchemaDefinition,
 		Resolver:        resolver,
 		RenameTypeNames: renameTypeNames,
-		TrackUsageInfo:  b.trackUsageInfo,
 	}, nil
 }
 
@@ -273,7 +271,7 @@ func (b *ExecutorConfigurationBuilder) buildPlannerConfiguration(ctx context.Con
 	// the plan config is what the engine uses to turn a GraphQL Request into an execution plan
 	// the plan config is stateful as it carries connection pools and other things
 
-	loader := NewLoader(b.trackUsageInfo, NewDefaultFactoryResolver(
+	loader := NewLoader(NewDefaultFactoryResolver(
 		ctx,
 		b.transportOptions,
 		b.transport,

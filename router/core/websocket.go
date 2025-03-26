@@ -46,11 +46,9 @@ var (
 
 type WebsocketMiddlewareOptions struct {
 	OperationProcessor *OperationProcessor
-	OperationBlocker   *OperationBlocker
 	Planner            *OperationPlanner
 	GraphQLHandler     *GraphQLHandler
 	PreHandler         *PreHandler
-	Metrics            RouterMetrics
 	AccessController   *AccessController
 	Logger             *zap.Logger
 	Stats              statistics.EngineStatistics
@@ -74,11 +72,9 @@ func NewWebsocketMiddleware(ctx context.Context, opts WebsocketMiddlewareOptions
 	handler := &WebsocketHandler{
 		ctx:                       ctx,
 		operationProcessor:        opts.OperationProcessor,
-		operationBlocker:          opts.OperationBlocker,
 		planner:                   opts.Planner,
 		graphqlHandler:            opts.GraphQLHandler,
 		preHandler:                opts.PreHandler,
-		metrics:                   opts.Metrics,
 		accessController:          opts.AccessController,
 		logger:                    opts.Logger,
 		stats:                     opts.Stats,
@@ -199,11 +195,9 @@ type WebsocketHandler struct {
 	ctx                context.Context
 	config             *config.WebSocketConfiguration
 	operationProcessor *OperationProcessor
-	operationBlocker   *OperationBlocker
 	planner            *OperationPlanner
 	graphqlHandler     *GraphQLHandler
 	preHandler         *PreHandler
-	metrics            RouterMetrics
 	accessController   *AccessController
 	logger             *zap.Logger
 
@@ -311,11 +305,9 @@ func (h *WebsocketHandler) handleUpgradeRequest(w http.ResponseWriter, r *http.R
 
 	handler := NewWebsocketConnectionHandler(h.ctx, WebSocketConnectionHandlerOptions{
 		OperationProcessor:        h.operationProcessor,
-		OperationBlocker:          h.operationBlocker,
 		Planner:                   h.planner,
 		GraphQLHandler:            h.graphqlHandler,
 		PreHandler:                h.preHandler,
-		Metrics:                   h.metrics,
 		PlanOptions:               planOptions,
 		ResponseWriter:            w,
 		Request:                   r,
@@ -652,11 +644,9 @@ type graphqlError struct {
 type WebSocketConnectionHandlerOptions struct {
 	Config                    *config.WebSocketConfiguration
 	OperationProcessor        *OperationProcessor
-	OperationBlocker          *OperationBlocker
 	Planner                   *OperationPlanner
 	GraphQLHandler            *GraphQLHandler
 	PreHandler                *PreHandler
-	Metrics                   RouterMetrics
 	ResponseWriter            http.ResponseWriter
 	Request                   *http.Request
 	Connection                *wsConnectionWrapper
@@ -677,12 +667,10 @@ type WebSocketConnectionHandlerOptions struct {
 type WebSocketConnectionHandler struct {
 	ctx                context.Context
 	operationProcessor *OperationProcessor
-	operationBlocker   *OperationBlocker
 	planner            *OperationPlanner
 	graphqlHandler     *GraphQLHandler
 	plannerOptions     PlanOptions
 	preHandler         *PreHandler
-	metrics            RouterMetrics
 	w                  http.ResponseWriter
 	// request is the original client request. It is not safe for concurrent use.
 	// You have to clone it before using it in a goroutine.
@@ -731,11 +719,9 @@ func NewWebsocketConnectionHandler(ctx context.Context, opts WebSocketConnection
 	return &WebSocketConnectionHandler{
 		ctx:                       ctx,
 		operationProcessor:        opts.OperationProcessor,
-		operationBlocker:          opts.OperationBlocker,
 		planner:                   opts.Planner,
 		graphqlHandler:            opts.GraphQLHandler,
 		preHandler:                opts.PreHandler,
-		metrics:                   opts.Metrics,
 		w:                         opts.ResponseWriter,
 		request:                   opts.Request,
 		conn:                      opts.Connection,
@@ -793,29 +779,12 @@ func (h *WebSocketConnectionHandler) parseAndPlan(registration *SubscriptionRegi
 
 	opContext.extensions = operationKit.parsedOperation.Request.Extensions
 
-	var (
-		skipParse bool
-		isApq     bool
-	)
-
-	if operationKit.parsedOperation.IsPersistedOperation {
-		skipParse, isApq, err = operationKit.FetchPersistedOperation(h.ctx, h.clientInfo)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-
-	// If the persistent operation is already in the cache, we skip the parse step
-	// because the operation was already parsed. This is a performance optimization, and we
-	// can do it because we know that the persisted operation is immutable (identified by the hash)
-	if !skipParse {
-		startParsing := time.Now()
-		if err := operationKit.Parse(); err != nil {
-			opContext.parsingTime = time.Since(startParsing)
-			return nil, nil, err
-		}
+	startParsing := time.Now()
+	if err := operationKit.Parse(); err != nil {
 		opContext.parsingTime = time.Since(startParsing)
+		return nil, nil, err
 	}
+	opContext.parsingTime = time.Since(startParsing)
 
 	opContext.name = operationKit.parsedOperation.Request.OperationName
 	opContext.opType = operationKit.parsedOperation.Type
@@ -825,13 +794,9 @@ func (h *WebSocketConnectionHandler) parseAndPlan(registration *SubscriptionRegi
 		return nil, nil, fmt.Errorf("request context not found")
 	}
 
-	if blocked := h.operationBlocker.OperationIsBlocked(h.logger, reqCtx.expressionContext, operationKit.parsedOperation); blocked != nil {
-		return nil, nil, blocked
-	}
-
 	startNormalization := time.Now()
 
-	if _, err := operationKit.NormalizeOperation(h.clientInfo.Name, isApq); err != nil {
+	if _, err := operationKit.NormalizeOperation(); err != nil {
 		opContext.normalizationTime = time.Since(startNormalization)
 		return nil, nil, err
 	}
@@ -957,13 +922,6 @@ func (h *WebSocketConnectionHandler) executeSubscription(registration *Subscript
 		resolveCtx = WithAuthorizationExtension(resolveCtx)
 		resolveCtx.SetAuthorizer(h.graphqlHandler.authorizer)
 	}
-	resolveCtx = h.graphqlHandler.configureRateLimiting(resolveCtx)
-
-	// Put in a closure to evaluate err after defer
-	defer func() {
-		// StatusCode has no meaning here. We set it to 0 but set the error.
-		h.metrics.ExportSchemaUsageInfo(operationCtx, 0, err != nil, false)
-	}()
 
 	switch p := operationCtx.preparedPlan.preparedPlan.(type) {
 	case *plan.SynchronousResponsePlan:

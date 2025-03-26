@@ -207,17 +207,6 @@ type CacheWarmupPlanningProcessorOptions struct {
 	DisableVariablesRemapping bool
 }
 
-func NewCacheWarmupPlanningProcessor(options *CacheWarmupPlanningProcessorOptions) *CacheWarmupPlanningProcessor {
-	return &CacheWarmupPlanningProcessor{
-		operationProcessor:        options.OperationProcessor,
-		operationPlanner:          options.OperationPlanner,
-		complexityLimits:          options.ComplexityLimits,
-		routerSchema:              options.RouterSchema,
-		trackSchemaUsage:          options.TrackSchemaUsage,
-		disableVariablesRemapping: options.DisableVariablesRemapping,
-	}
-}
-
 type CacheWarmupOperationPlanResult struct {
 	OperationHash string
 	OperationName string
@@ -237,11 +226,6 @@ type CacheWarmupPlanningProcessor struct {
 }
 
 func (c *CacheWarmupPlanningProcessor) ProcessOperation(ctx context.Context, operation *nodev1.Operation) (*CacheWarmupOperationPlanResult, error) {
-
-	var (
-		isAPQ bool
-	)
-
 	k, err := c.operationProcessor.NewIndependentKit()
 	if err != nil {
 		return nil, err
@@ -262,7 +246,7 @@ func (c *CacheWarmupPlanningProcessor) ProcessOperation(ctx context.Context, ope
 			Extensions:    s,
 		},
 		Client: &ClientInfo{
-			Name: operation.GetClient().GetName(),
+			Name:    operation.GetClient().GetName(),
 			Version: operation.GetClient().GetVersion(),
 		},
 	}
@@ -279,19 +263,12 @@ func (c *CacheWarmupPlanningProcessor) ProcessOperation(ctx context.Context, ope
 		return nil, err
 	}
 
-	if k.parsedOperation.IsPersistedOperation && k.parsedOperation.Request.Query == "" {
-		_, isAPQ, err = k.FetchPersistedOperation(ctx, item.Client)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	err = k.Parse()
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = k.NormalizeOperation(item.Client.Name, isAPQ)
+	_, err = k.NormalizeOperation()
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +289,7 @@ func (c *CacheWarmupPlanningProcessor) ProcessOperation(ctx context.Context, ope
 	}
 
 	if c.complexityLimits != nil {
-		_, _, _ = k.ValidateQueryComplexity(c.complexityLimits, k.kit.doc, c.routerSchema, k.parsedOperation.IsPersistedOperation)
+		_, _, _ = k.ValidateQueryComplexity(c.complexityLimits, k.kit.doc, c.routerSchema)
 	}
 
 	planOptions := PlanOptions{

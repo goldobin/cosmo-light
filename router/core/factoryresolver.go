@@ -143,10 +143,9 @@ func (d *DefaultFactoryResolver) ResolvePubsubFactory() (factory plan.PlannerFac
 	return d.pubsub, nil
 }
 
-func NewLoader(includeInfo bool, resolver FactoryResolver) *Loader {
+func NewLoader(resolver FactoryResolver) *Loader {
 	return &Loader{
-		resolver:    resolver,
-		includeInfo: includeInfo,
+		resolver: resolver,
 	}
 }
 

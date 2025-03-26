@@ -27,11 +27,3 @@ func DefaultEndpoint() string {
 	}
 	return CloudDefaultTelemetryEndpoint
 }
-
-// DefaultEndpointHeaders returns the headers required to talk to the default
-// endpoint
-func DefaultEndpointHeaders(authToken string) map[string]string {
-	return map[string]string{
-		"Authorization": "Bearer " + authToken,
-	}
-}

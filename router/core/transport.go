@@ -327,30 +327,28 @@ type TransportFactory struct {
 var _ ApiTransportFactory = TransportFactory{}
 
 type TransportOptions struct {
-	PreHandlers                   []TransportPreHandler
-	PostHandlers                  []TransportPostHandler
-	SubgraphTransportOptions      *SubgraphTransportOptions
-	Proxy                         ProxyFunc
-	RetryOptions                  retrytransport.RetryOptions
-	LocalhostFallbackInsideDocker bool
-	MetricStore                   metric.Store
-	Logger                        *zap.Logger
-	TracerProvider                *sdktrace.TracerProvider
-	TracePropagators              propagation.TextMapPropagator
+	PreHandlers              []TransportPreHandler
+	PostHandlers             []TransportPostHandler
+	SubgraphTransportOptions *SubgraphTransportOptions
+	Proxy                    ProxyFunc
+	RetryOptions             retrytransport.RetryOptions
+	MetricStore              metric.Store
+	Logger                   *zap.Logger
+	TracerProvider           *sdktrace.TracerProvider
+	TracePropagators         propagation.TextMapPropagator
 }
 
 func NewTransport(opts *TransportOptions) *TransportFactory {
 	return &TransportFactory{
-		preHandlers:                   opts.PreHandlers,
-		postHandlers:                  opts.PostHandlers,
-		retryOptions:                  opts.RetryOptions,
-		subgraphTransportOptions:      opts.SubgraphTransportOptions,
-		localhostFallbackInsideDocker: opts.LocalhostFallbackInsideDocker,
-		metricStore:                   opts.MetricStore,
-		logger:                        opts.Logger,
-		tracerProvider:                opts.TracerProvider,
-		proxy:                         opts.Proxy,
-		tracePropagators:              opts.TracePropagators,
+		preHandlers:              opts.PreHandlers,
+		postHandlers:             opts.PostHandlers,
+		retryOptions:             opts.RetryOptions,
+		subgraphTransportOptions: opts.SubgraphTransportOptions,
+		metricStore:              opts.MetricStore,
+		logger:                   opts.Logger,
+		tracerProvider:           opts.TracerProvider,
+		proxy:                    opts.Proxy,
+		tracePropagators:         opts.TracePropagators,
 	}
 }
 

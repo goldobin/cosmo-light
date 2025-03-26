@@ -57,7 +57,6 @@ import (
 	"github.com/wundergraph/cosmo/router/core"
 	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
 	"github.com/wundergraph/cosmo/router/pkg/config"
-	"github.com/wundergraph/cosmo/router/pkg/controlplane/configpoller"
 	"github.com/wundergraph/cosmo/router/pkg/logging"
 	rmetric "github.com/wundergraph/cosmo/router/pkg/metric"
 	pubsubNats "github.com/wundergraph/cosmo/router/pkg/pubsub/nats"
@@ -231,8 +230,7 @@ func assertCacheMetrics(t testing.TB, env *Environment, expected CacheMetricsAss
 }
 
 type RouterConfig struct {
-	StaticConfig        *nodev1.RouterConfig
-	ConfigPollerFactory func(config *nodev1.RouterConfig) configpoller.ConfigPoller
+	StaticConfig *nodev1.RouterConfig
 }
 
 type MetricExclusions struct {
@@ -265,10 +263,8 @@ type Config struct {
 	RouterConfigJSONTemplate           string
 	ModifyRouterConfig                 func(routerConfig *nodev1.RouterConfig)
 	ModifyEngineExecutionConfiguration func(engineExecutionConfiguration *config.EngineExecutionConfiguration)
-	ModifySecurityConfiguration        func(securityConfiguration *config.SecurityConfiguration)
 	ModifySubgraphErrorPropagation     func(subgraphErrorPropagation *config.SubgraphErrorPropagationConfiguration)
 	ModifyWebsocketConfiguration       func(websocketConfiguration *config.WebSocketConfiguration)
-	ModifyCDNConfig                    func(cdnConfig *config.CDNConfiguration)
 	KafkaSeeds                         []string
 	DisableWebSockets                  bool
 	DisableParentBasedSampler          bool
@@ -284,7 +280,6 @@ type Config struct {
 	NoRetryClient                      bool
 	PropagationConfig                  config.PropagationConfig
 	CacheControlPolicy                 config.CacheControlPolicy
-	ApqConfig                          config.AutomaticPersistedQueriesConfig
 	LogObservation                     LogObservationConfig
 	ClientHeader                       config.ClientHeader
 	ResponseTraceHeader                config.ResponseTraceHeader
@@ -300,8 +295,6 @@ type Config struct {
 	SubgraphAccessLogFields            []config.CustomAttribute
 	AssertCacheMetrics                 *CacheMetricsAssertions
 	DisableSimulateCloudExporter       bool
-	CdnSever                           *httptest.Server
-	UseVersionedGraph                  bool
 }
 
 type CacheMetricsAssertions struct {
@@ -597,11 +590,6 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 		cfg.ModifyRouterConfig(&routerConfig)
 	}
 
-	cdnServer := cfg.CdnSever
-	if cfg.CdnSever == nil {
-		cdnServer = SetupCDNServer(t, freeport.GetOne(t))
-	}
-
 	if cfg.PrometheusRegistry != nil {
 		cfg.PrometheusPort = ports[0]
 	}
@@ -623,7 +611,7 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 
 	kafkaStarted.Wait()
 
-	rr, err := configureRouter(listenerAddr, cfg, &routerConfig, cdnServer, natsSetup)
+	rr, err := configureRouter(listenerAddr, cfg, &routerConfig, natsSetup)
 	if err != nil {
 		return nil, err
 	}
@@ -720,7 +708,6 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 		Router:                  rr,
 		RouterURL:               rr.BaseURL(),
 		RouterClient:            client,
-		CDN:                     cdnServer,
 		NatsData:                natsSetup,
 		SubgraphRequestCount:    counters,
 		KafkaAdminClient:        kafkaAdminClient,
@@ -772,13 +759,8 @@ func GenerateVersionedJwtToken() (string, error) {
 	return jwtToken.SignedString([]byte("hunter2"))
 }
 
-func configureRouter(listenerAddr string, testConfig *Config, routerConfig *nodev1.RouterConfig, cdn *httptest.Server, natsData *NatsData) (*core.Router, error) {
+func configureRouter(listenerAddr string, testConfig *Config, routerConfig *nodev1.RouterConfig, natsData *NatsData) (*core.Router, error) {
 	cfg := config.Config{
-		Graph: config.Graph{},
-		CDN: config.CDNConfiguration{
-			URL:       cdn.URL,
-			CacheSize: 1024 * 1024,
-		},
 		SubgraphErrorPropagation: config.SubgraphErrorPropagationConfiguration{
 			Enabled:                true,
 			PropagateStatusCodes:   true,
@@ -788,22 +770,8 @@ func configureRouter(listenerAddr string, testConfig *Config, routerConfig *node
 			RewritePaths:           true,
 			AllowedExtensionFields: []string{"code"},
 		},
-		CacheControl:              testConfig.CacheControlPolicy,
-		AutomaticPersistedQueries: testConfig.ApqConfig,
+		CacheControl: testConfig.CacheControlPolicy,
 	}
-
-	if testConfig.ModifyCDNConfig != nil {
-		testConfig.ModifyCDNConfig(&cfg.CDN)
-	}
-
-	graphApiToken, err := generateJwtToken()
-	if testConfig.UseVersionedGraph {
-		graphApiToken, err = GenerateVersionedJwtToken()
-	}
-	if err != nil {
-		return nil, err
-	}
-
 	engineExecutionConfig := config.EngineExecutionConfiguration{
 		EnableNetPoll:                          true,
 		EnableSingleFlight:                     true,
@@ -817,23 +785,18 @@ func configureRouter(listenerAddr string, testConfig *Config, routerConfig *node
 			EnablePersistedOperationsCacheResponseHeader: true,
 			EnableNormalizationCacheResponseHeader:       true,
 		},
-		WebSocketClientPollTimeout:     300 * time.Millisecond,
-		WebSocketClientConnBufferSize:  1,
-		WebSocketClientReadTimeout:     100 * time.Millisecond,
-		MaxConcurrentResolvers:         32,
-		ExecutionPlanCacheSize:         1024,
-		EnablePersistedOperationsCache: true,
-		OperationHashCacheSize:         2048,
-		ParseKitPoolSize:               8,
-		EnableValidationCache:          true,
-		ValidationCacheSize:            1024,
+		WebSocketClientPollTimeout:    300 * time.Millisecond,
+		WebSocketClientConnBufferSize: 1,
+		WebSocketClientReadTimeout:    100 * time.Millisecond,
+		MaxConcurrentResolvers:        32,
+		ExecutionPlanCacheSize:        1024,
+		OperationHashCacheSize:        2048,
+		ParseKitPoolSize:              8,
+		EnableValidationCache:         true,
+		ValidationCacheSize:           1024,
 	}
 	if testConfig.ModifyEngineExecutionConfiguration != nil {
 		testConfig.ModifyEngineExecutionConfiguration(&engineExecutionConfig)
-	}
-
-	if testConfig.ModifySecurityConfiguration != nil {
-		testConfig.ModifySecurityConfiguration(&cfg.SecurityConfiguration)
 	}
 
 	if testConfig.ModifySubgraphErrorPropagation != nil {
@@ -876,15 +839,11 @@ func configureRouter(listenerAddr string, testConfig *Config, routerConfig *node
 			SubgraphEnabled:    testConfig.SubgraphAccessLogsEnabled,
 			SubgraphAttributes: testConfig.SubgraphAccessLogFields,
 		}),
-		core.WithGraphApiToken(graphApiToken),
 		core.WithDevelopmentMode(true),
 		core.WithPlayground(true),
 		core.WithPlaygroundConfig(config.PlaygroundConfig{Enabled: true}),
 		core.WithEngineExecutionConfig(engineExecutionConfig),
-		core.WithSecurityConfig(cfg.SecurityConfiguration),
 		core.WithCacheControlPolicy(cfg.CacheControl),
-		core.WithAutomatedPersistedQueriesConfig(cfg.AutomaticPersistedQueries),
-		core.WithCDN(cfg.CDN),
 		core.WithListenerAddr(listenerAddr),
 		core.WithSubgraphErrorPropagation(cfg.SubgraphErrorPropagation),
 		core.WithTLSConfig(testConfig.TLSConfig),
@@ -899,8 +858,6 @@ func configureRouter(listenerAddr string, testConfig *Config, routerConfig *node
 	if testConfig.RouterConfig != nil {
 		if testConfig.RouterConfig.StaticConfig != nil {
 			routerOpts = append(routerOpts, core.WithStaticExecutionConfig(testConfig.RouterConfig.StaticConfig))
-		} else if testConfig.RouterConfig.ConfigPollerFactory != nil {
-			routerOpts = append(routerOpts, core.WithConfigPoller(testConfig.RouterConfig.ConfigPollerFactory(routerConfig)))
 		} else {
 			return nil, errors.New("router config is nil")
 		}
