@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 
 	"github.com/KimMachineGun/automemlimit/memlimit"
@@ -106,11 +105,6 @@ func NewRouter(ctx context.Context, params Params, additionalOptions ...core.Opt
 		core.WithWebSocketConfiguration(&cfg.WebSocket),
 		core.WithSubgraphErrorPropagation(cfg.SubgraphErrorPropagation),
 		core.WithClientHeader(cfg.ClientHeader),
-	}
-
-	// HTTP_PROXY, HTTPS_PROXY and NO_PROXY
-	if hasProxyConfigured() {
-		core.WithProxy(http.ProxyFromEnvironment)
 	}
 
 	options = append(options, additionalOptions...)
@@ -264,11 +258,4 @@ func setupAuthenticators(ctx context.Context, logger *zap.Logger, cfg *config.Co
 	}
 
 	return authenticators, nil
-}
-
-func hasProxyConfigured() bool {
-	_, httpProxy := os.LookupEnv("HTTP_PROXY")
-	_, httpsProxy := os.LookupEnv("HTTPS_PROXY")
-	_, noProxy := os.LookupEnv("NO_PROXY")
-	return httpProxy || httpsProxy || noProxy
 }

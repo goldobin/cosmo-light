@@ -65,7 +65,6 @@ type (
 		playgroundHandler       func(http.Handler) http.Handler
 		publicKey               *ecdsa.PublicKey
 		executionTransport      *http.Transport
-		executionTransportProxy ProxyFunc
 		baseOtelAttributes      []attribute.KeyValue
 		baseRouterConfigVersion string
 		mux                     *chi.Mux
@@ -83,7 +82,7 @@ type (
 )
 
 // newGraphServer creates a new server instance.
-func newGraphServer(ctx context.Context, r *Router, routerConfig *nodev1.RouterConfig, proxy ProxyFunc) (*graphServer, error) {
+func newGraphServer(ctx context.Context, r *Router, routerConfig *nodev1.RouterConfig) (*graphServer, error) {
 	/* Older versions of composition will not populate a compatibility version.
 	 * Currently, all "old" router execution configurations are compatible as there have been no breaking
 	 * changes.
@@ -100,8 +99,7 @@ func newGraphServer(ctx context.Context, r *Router, routerConfig *nodev1.RouterC
 		cancelFunc:              cancel,
 		Config:                  &r.Config,
 		engineStats:             r.EngineStats,
-		executionTransport:      newHTTPTransport(r.subgraphTransportOptions.TransportRequestOptions, proxy),
-		executionTransportProxy: proxy,
+		executionTransport:      newHTTPTransport(r.subgraphTransportOptions.TransportRequestOptions),
 		playgroundHandler:       r.playgroundHandler,
 		baseRouterConfigVersion: routerConfig.GetVersion(),
 		inFlightRequests:        &atomic.Uint64{},
@@ -796,7 +794,6 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 		transport:     s.executionTransport,
 		logger:        s.logger,
 		transportOptions: &TransportOptions{
-			Proxy:                    s.executionTransportProxy,
 			SubgraphTransportOptions: s.subgraphTransportOptions,
 			PreHandlers:              s.preOriginHandlers,
 			PostHandlers:             s.postOriginHandlers,

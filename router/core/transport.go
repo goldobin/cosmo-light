@@ -321,7 +321,6 @@ type TransportFactory struct {
 	logger                        *zap.Logger
 	tracerProvider                *sdktrace.TracerProvider
 	tracePropagators              propagation.TextMapPropagator
-	proxy                         ProxyFunc
 }
 
 var _ ApiTransportFactory = TransportFactory{}
@@ -330,7 +329,6 @@ type TransportOptions struct {
 	PreHandlers              []TransportPreHandler
 	PostHandlers             []TransportPostHandler
 	SubgraphTransportOptions *SubgraphTransportOptions
-	Proxy                    ProxyFunc
 	RetryOptions             retrytransport.RetryOptions
 	MetricStore              metric.Store
 	Logger                   *zap.Logger
@@ -347,14 +345,13 @@ func NewTransport(opts *TransportOptions) *TransportFactory {
 		metricStore:              opts.MetricStore,
 		logger:                   opts.Logger,
 		tracerProvider:           opts.TracerProvider,
-		proxy:                    opts.Proxy,
 		tracePropagators:         opts.TracePropagators,
 	}
 }
 
 func (t TransportFactory) RoundTripper(enableSingleFlight bool, baseTransport http.RoundTripper) http.RoundTripper {
 	if t.subgraphTransportOptions != nil && t.subgraphTransportOptions.SubgraphMap != nil && len(t.subgraphTransportOptions.SubgraphMap) > 0 {
-		baseTransport = NewSubgraphTransport(t.subgraphTransportOptions, baseTransport, t.logger, t.proxy)
+		baseTransport = NewSubgraphTransport(t.subgraphTransportOptions, baseTransport, t.logger)
 	}
 
 	if t.localhostFallbackInsideDocker && docker.Inside() {

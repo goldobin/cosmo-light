@@ -63,7 +63,6 @@ type (
 		modules           []Module
 		EngineStats       statistics.EngineStatistics
 		playgroundHandler func(http.Handler) http.Handler
-		proxy             ProxyFunc
 	}
 
 	TransportRequestOptions struct {
@@ -482,7 +481,7 @@ func NewRouter(opts ...Option) (*Router, error) {
 
 // newGraphServer creates a new server.
 func (r *Router) newServer(ctx context.Context, cfg *nodev1.RouterConfig) error {
-	server, err := newGraphServer(ctx, r, cfg, r.proxy)
+	server, err := newGraphServer(ctx, r, cfg)
 	if err != nil {
 		r.logger.Error("Failed to create graph server. Keeping the old server", zap.Error(err))
 		return err
@@ -1036,12 +1035,6 @@ func WithHealthCheckPath(path string) Option {
 	}
 }
 
-func WithProxy(proxy ProxyFunc) Option {
-	return func(r *Router) {
-		r.proxy = proxy
-	}
-}
-
 func WithReadinessCheckPath(path string) Option {
 	return func(r *Router) {
 		r.readinessCheckPath = path
@@ -1269,7 +1262,7 @@ func WithClientHeader(cfg config.ClientHeader) Option {
 
 type ProxyFunc func(req *http.Request) (*url.URL, error)
 
-func newHTTPTransport(opts *TransportRequestOptions, proxy ProxyFunc) *http.Transport {
+func newHTTPTransport(opts *TransportRequestOptions) *http.Transport {
 	dialer := &net.Dialer{
 		Timeout:   opts.DialTimeout,
 		KeepAlive: opts.KeepAliveProbeInterval,
@@ -1295,9 +1288,6 @@ func newHTTPTransport(opts *TransportRequestOptions, proxy ProxyFunc) *http.Tran
 		TLSHandshakeTimeout:   opts.TLSHandshakeTimeout,
 		ResponseHeaderTimeout: opts.ResponseHeaderTimeout,
 		ExpectContinueTimeout: opts.ExpectContinueTimeout,
-		// Will return nil when HTTP(S)_PROXY does not exist or is empty.
-		// This will prevent the transport from handling the proxy when it is not needed.
-		Proxy: proxy,
 	}
 }
 
