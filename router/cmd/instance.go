@@ -105,7 +105,6 @@ func NewRouter(ctx context.Context, params Params, additionalOptions ...core.Opt
 		core.WithAuthorizationConfig(&cfg.Authorization),
 		core.WithWebSocketConfiguration(&cfg.WebSocket),
 		core.WithSubgraphErrorPropagation(cfg.SubgraphErrorPropagation),
-		core.WithEvents(cfg.Events),
 		core.WithClientHeader(cfg.ClientHeader),
 	}
 

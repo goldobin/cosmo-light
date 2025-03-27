@@ -24,9 +24,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -36,12 +34,8 @@ import (
 	"github.com/hashicorp/consul/sdk/freeport"
 	"github.com/hashicorp/go-cleanhttp"
 	"github.com/hashicorp/go-retryablehttp"
-	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
-	"github.com/twmb/franz-go/pkg/kadm"
-	"github.com/twmb/franz-go/pkg/kgo"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -287,7 +281,6 @@ type Config struct {
 	AccessLogger                       *zap.Logger
 	AccessLogFields                    []config.CustomAttribute
 	MetricOptions                      MetricOptions
-	ModifyEventsConfiguration          func(cfg *config.EventsConfiguration)
 	EnableRuntimeMetrics               bool
 	EnableNats                         bool
 	EnableKafka                        bool
@@ -343,67 +336,8 @@ type LogObservationConfig struct {
 func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 	t.Helper()
 
-	var (
-		kafkaAdminClient *kadm.Client
-		kafkaStarted     sync.WaitGroup
-		kafkaClient      *kgo.Client
-		natsStarted      sync.WaitGroup
-		natsSetup        *NatsData
-		kafkaSetup       *KafkaData
-		pubSubPrefix     = strconv.FormatUint(rand.Uint64(), 16)
-	)
-
 	if len(cfg.KafkaSeeds) == 0 {
 		cfg.KafkaSeeds = []string{"localhost:9092"}
-	}
-
-	if cfg.EnableKafka {
-		// Depending on whether or not we are in CI e.g. Github Actions, we
-		// either start a kafka container or use the one provided by the CI
-		// This is faster in GHA due to pitiful DIND speed, and helps prevent timeout
-		// related errors (for now)
-		if os.Getenv("CI") == "true" {
-			cfg.KafkaSeeds = []string{"localhost:9092"}
-
-			client, err := kgo.NewClient(
-				kgo.SeedBrokers(cfg.KafkaSeeds...),
-			)
-			if err != nil {
-				return nil, err
-			}
-
-			kafkaClient = client
-			kafkaAdminClient = kadm.NewClient(kafkaClient)
-		} else {
-			kafkaStarted.Add(1)
-			go func() {
-				defer kafkaStarted.Done()
-
-				var kafkaSetupErr error
-				kafkaSetup, kafkaSetupErr = setupKafkaServer(t)
-				if kafkaSetupErr != nil || kafkaSetup == nil {
-					t.Fatalf("could not setup kafka: %s", kafkaSetupErr.Error())
-					return
-				}
-
-				kafkaClient = kafkaSetup.Client
-				kafkaAdminClient = kadm.NewClient(kafkaClient)
-
-				cfg.KafkaSeeds = kafkaSetup.Brokers
-			}()
-		}
-	}
-
-	if cfg.EnableNats {
-		natsStarted.Add(1)
-		go func() {
-			defer natsStarted.Done()
-			var natsErr error
-			natsSetup, natsErr = setupNatsServers(t)
-			if natsErr != nil {
-				t.Fatalf("could not setup nats: %s", natsErr.Error())
-			}
-		}()
 	}
 
 	if cfg.AssertCacheMetrics != nil {
@@ -1068,26 +1002,19 @@ func gqlURL(srv *httptest.Server) string {
 }
 
 type Environment struct {
-	t                     testing.TB
-	cfg                   *Config
-	graphQLPath           string
-	absinthePath          string
-	shutdown              *atomic.Bool
-	Context               context.Context
-	cancel                context.CancelCauseFunc
-	Router                *core.Router
-	RouterURL             string
-	RouterClient          *http.Client
-	Servers               []*httptest.Server
-	CDN                   *httptest.Server
-	NatsData              *NatsData
-	NatsConnectionDefault *nats.Conn
-	NatsConnectionMyNats  *nats.Conn
-	SubgraphRequestCount  *SubgraphRequestCount
-	KafkaAdminClient      *kadm.Client
-	KafkaClient           *kgo.Client
-	logObserver           *observer.ObservedLogs
-	getPubSubName         func(name string) string
+	t                    testing.TB
+	cfg                  *Config
+	graphQLPath          string
+	absinthePath         string
+	shutdown             *atomic.Bool
+	Context              context.Context
+	cancel               context.CancelCauseFunc
+	Router               *core.Router
+	RouterURL            string
+	RouterClient         *http.Client
+	Servers              []*httptest.Server
+	SubgraphRequestCount *SubgraphRequestCount
+	logObserver          *observer.ObservedLogs
 
 	shutdownDelay       time.Duration
 	extraURLQueryValues url.Values
@@ -1103,12 +1030,6 @@ func GetPubSubNameFn(prefix string) func(name string) string {
 	return func(name string) string {
 		return prefix + name
 	}
-}
-
-// GetPubSubName returns the name of a PubSub entity (subject, topic, subscription, etc.) unique for this test environment.
-// Using this method avoid conflicts between tests running in parallel.
-func (e *Environment) GetPubSubName(name string) string {
-	return e.getPubSubName(name)
 }
 
 func (e *Environment) RouterConfigVersionMain() string {
@@ -1165,29 +1086,6 @@ func (e *Environment) Shutdown() {
 		if lErr != nil {
 			e.t.Logf("could not close server listener: %s", lErr)
 		}
-	}
-
-	// Close the CDN
-	e.CDN.CloseClientConnections()
-	// Do not call s.Close() here, as it will get stuck on connections left open!
-	lErr := e.CDN.Listener.Close()
-	if lErr != nil {
-		e.t.Logf("could not close CDN listener: %s", lErr)
-	}
-
-	// Flush NATS connections
-	if e.cfg.EnableNats {
-		if e.NatsConnectionMyNats != nil {
-			e.NatsConnectionMyNats.Flush()
-		}
-		if e.NatsConnectionDefault != nil {
-			e.NatsConnectionDefault.Flush()
-		}
-	}
-
-	// Flush Kafka connection
-	if e.cfg.EnableKafka && e.KafkaClient != nil {
-		e.KafkaClient.Flush(ctx)
 	}
 
 	if e.routerCmd != nil {

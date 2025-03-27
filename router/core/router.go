@@ -143,7 +143,6 @@ type (
 		cacheControlPolicy             config.CacheControlPolicy
 		apolloCompatibilityFlags       config.ApolloCompatibilityFlags
 		apolloRouterCompatibilityFlags config.ApolloRouterCompatibilityFlags
-		eventsConfig                   config.EventsConfiguration
 		prometheusServer               *http.Server
 		modulesConfig                  map[string]interface{}
 		executionConfig                *ExecutionConfig
@@ -452,17 +451,9 @@ func NewRouter(opts ...Option) (*Router, error) {
 		})
 	}
 
-	for _, source := range r.eventsConfig.Providers.Nats {
-		r.logger.Info("Nats Event source enabled", zap.String("provider_id", source.ID))
-	}
-	for _, source := range r.eventsConfig.Providers.Kafka {
-		r.logger.Info("Kafka Event source enabled", zap.String("provider_id", source.ID), zap.Strings("brokers", source.Brokers))
-	}
-
 	if !r.engineExecutionConfiguration.EnableNetPoll {
 		r.logger.Warn("Net poller is disabled by configuration. Falling back to less efficient connection handling method.")
 	} else if err := netpoll.Supported(); err != nil {
-
 		// Disable netPoll if it's not supported. This flag is used everywhere to decide whether to use netPoll or not.
 		r.engineExecutionConfiguration.EnableNetPoll = false
 
@@ -1060,13 +1051,6 @@ func WithReadinessCheckPath(path string) Option {
 func WithLivenessCheckPath(path string) Option {
 	return func(r *Router) {
 		r.livenessCheckPath = path
-	}
-}
-
-// WithEvents sets the configuration for the events client
-func WithEvents(cfg config.EventsConfiguration) Option {
-	return func(r *Router) {
-		r.eventsConfig = cfg
 	}
 }
 

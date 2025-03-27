@@ -439,55 +439,6 @@ type RateLimitSimpleStrategy struct {
 	HideStatsFromResponseExtension bool          `yaml:"hide_stats_from_response_extension" envDefault:"false" env:"RATE_LIMIT_SIMPLE_HIDE_STATS_FROM_RESPONSE_EXTENSION"`
 }
 
-type NatsTokenBasedAuthentication struct {
-	Token *string `yaml:"token,omitempty"`
-}
-
-type NatsCredentialsAuthentication struct {
-	Password *string `yaml:"password,omitempty"`
-	Username *string `yaml:"username,omitempty"`
-}
-
-type NatsAuthentication struct {
-	UserInfo                     NatsCredentialsAuthentication `yaml:"user_info"`
-	NatsTokenBasedAuthentication `yaml:"token,inline"`
-}
-
-type NatsEventSource struct {
-	ID             string              `yaml:"id,omitempty"`
-	URL            string              `yaml:"url,omitempty"`
-	Authentication *NatsAuthentication `yaml:"authentication,omitempty"`
-}
-
-type KafkaSASLPlainAuthentication struct {
-	Password *string `yaml:"password,omitempty"`
-	Username *string `yaml:"username,omitempty"`
-}
-
-type KafkaAuthentication struct {
-	SASLPlain KafkaSASLPlainAuthentication `yaml:"sasl_plain,omitempty"`
-}
-
-type KafkaTLSConfiguration struct {
-	Enabled bool `yaml:"enabled" envDefault:"false"`
-}
-
-type KafkaEventSource struct {
-	ID             string                 `yaml:"id,omitempty"`
-	Brokers        []string               `yaml:"brokers,omitempty"`
-	Authentication *KafkaAuthentication   `yaml:"authentication,omitempty"`
-	TLS            *KafkaTLSConfiguration `yaml:"tls,omitempty"`
-}
-
-type EventProviders struct {
-	Nats  []NatsEventSource  `yaml:"nats,omitempty"`
-	Kafka []KafkaEventSource `yaml:"kafka,omitempty"`
-}
-
-type EventsConfiguration struct {
-	Providers EventProviders `yaml:"providers,omitempty"`
-}
-
 type Cluster struct {
 	Name string `yaml:"name,omitempty" env:"CLUSTER_NAME"`
 }
@@ -774,7 +725,6 @@ type Config struct {
 	RateLimit                      RateLimitConfiguration                `yaml:"rate_limit,omitempty"`
 	LocalhostFallbackInsideDocker  bool                                  `yaml:"localhost_fallback_inside_docker" envDefault:"true" env:"LOCALHOST_FALLBACK_INSIDE_DOCKER"`
 	DevelopmentMode                bool                                  `yaml:"dev_mode" envDefault:"false" env:"DEV_MODE"`
-	Events                         EventsConfiguration                   `yaml:"events,omitempty"`
 	RouterConfigPath               string                                `yaml:"router_config_path,omitempty" env:"ROUTER_CONFIG_PATH"`
 	OverrideRoutingURL             OverrideRoutingURLConfiguration       `yaml:"override_routing_url"`
 	Overrides                      OverridesConfiguration                `yaml:"overrides"`
