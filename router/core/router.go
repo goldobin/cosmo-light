@@ -337,20 +337,6 @@ func NewRouter(opts ...Option) (*Router, error) {
 		}
 	}
 
-	var disabledFeatures []string
-
-	// The user might want to start the server with a static config
-	// Disable all features that requires a valid graph token and inform the user
-
-	disabledFeatures = append(disabledFeatures, "Schema Usage Tracking", "Persistent operations")
-	if !r.developmentMode {
-		disabledFeatures = append(disabledFeatures, "Advanced Request Tracing")
-	}
-
-	r.logger.Warn("No graph token provided. The following Cosmo Cloud features are disabled. Not recommended for Production.",
-		zap.Strings("features", disabledFeatures),
-	)
-
 	if r.developmentMode {
 		r.logger.Warn("Development mode enabled. This should only be used for testing purposes")
 	}
@@ -366,7 +352,6 @@ func NewRouter(opts ...Option) (*Router, error) {
 	} else if err := netpoll.Supported(); err != nil {
 		// Disable netPoll if it's not supported. This flag is used everywhere to decide whether to use netPoll or not.
 		r.engineExecutionConfiguration.EnableNetPoll = false
-
 		if errors.Is(err, netpoll.ErrUnsupported) {
 			r.logger.Warn(
 				"Net poller is only available on Linux and MacOS. Falling back to less efficient connection handling method.",

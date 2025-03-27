@@ -11,7 +11,6 @@ import (
 	"github.com/wundergraph/astjson"
 	rErrors "github.com/wundergraph/cosmo/router/internal/errors"
 	"github.com/wundergraph/cosmo/router/internal/unique"
-	"github.com/wundergraph/cosmo/router/pkg/pubsub"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/graphql_datasource"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/graphqlerrors"
@@ -65,10 +64,6 @@ func getErrorType(err error) errorType {
 		if nErr.Timeout() {
 			return errorTypeContextTimeout
 		}
-	}
-	var edfsErr *pubsub.Error
-	if errors.As(err, &edfsErr) {
-		return errorTypeEDFS
 	}
 	var invalidWsSubprotocolErr graphql_datasource.InvalidWsSubprotocolError
 	if errors.As(err, &invalidWsSubprotocolErr) {
