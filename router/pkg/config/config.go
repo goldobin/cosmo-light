@@ -10,7 +10,6 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/wundergraph/cosmo/router/internal/unique"
-	"github.com/wundergraph/cosmo/router/pkg/otel/otelconfig"
 )
 
 const (
@@ -46,11 +45,10 @@ type TracingGlobalFeatures struct {
 }
 
 type TracingExporter struct {
-	Disabled              bool                `yaml:"disabled"`
-	Exporter              otelconfig.Exporter `yaml:"exporter,omitempty"`
-	Endpoint              string              `yaml:"endpoint,omitempty"`
-	HTTPPath              string              `yaml:"path,omitempty" envDefault:"/v1/traces"`
-	Headers               map[string]string   `yaml:"headers,omitempty"`
+	Disabled              bool              `yaml:"disabled"`
+	Endpoint              string            `yaml:"endpoint,omitempty"`
+	HTTPPath              string            `yaml:"path,omitempty" envDefault:"/v1/traces"`
+	Headers               map[string]string `yaml:"headers,omitempty"`
 	TracingExporterConfig `yaml:",inline"`
 }
 
@@ -94,12 +92,10 @@ type Prometheus struct {
 }
 
 type MetricsOTLPExporter struct {
-	Disabled    bool                           `yaml:"disabled"`
-	Exporter    otelconfig.Exporter            `yaml:"exporter" envDefault:"http"`
-	Endpoint    string                         `yaml:"endpoint"`
-	HTTPPath    string                         `yaml:"path" envDefault:"/v1/metrics"`
-	Headers     map[string]string              `yaml:"headers"`
-	Temporality otelconfig.ExporterTemporality `yaml:"temporality"`
+	Disabled bool              `yaml:"disabled"`
+	Endpoint string            `yaml:"endpoint"`
+	HTTPPath string            `yaml:"path" envDefault:"/v1/metrics"`
+	Headers  map[string]string `yaml:"headers"`
 }
 
 type Metrics struct {
@@ -308,7 +304,6 @@ type EngineDebugConfiguration struct {
 type EngineExecutionConfiguration struct {
 	Debug                                  EngineDebugConfiguration `yaml:"debug"`
 	EnableSingleFlight                     bool                     `envDefault:"true" env:"ENGINE_ENABLE_SINGLE_FLIGHT" yaml:"enable_single_flight"`
-	EnableRequestTracing                   bool                     `envDefault:"true" env:"ENGINE_ENABLE_REQUEST_TRACING" yaml:"enable_request_tracing"`
 	EnableExecutionPlanCacheResponseHeader bool                     `envDefault:"false" env:"ENGINE_ENABLE_EXECUTION_PLAN_CACHE_RESPONSE_HEADER" yaml:"enable_execution_plan_cache_response_header"`
 	MaxConcurrentResolvers                 int                      `envDefault:"1024" env:"ENGINE_MAX_CONCURRENT_RESOLVERS" yaml:"max_concurrent_resolvers,omitempty"`
 	EnableNetPoll                          bool                     `envDefault:"true" env:"ENGINE_ENABLE_NET_POLL" yaml:"enable_net_poll"`
@@ -695,7 +690,6 @@ type CacheWarmupConfiguration struct {
 type Config struct {
 	Version                        string                                `yaml:"version,omitempty" ignored:"true"`
 	InstanceID                     string                                `yaml:"instance_id,omitempty" env:"INSTANCE_ID"`
-	Telemetry                      Telemetry                             `yaml:"telemetry,omitempty"`
 	Cluster                        Cluster                               `yaml:"cluster,omitempty"`
 	TLS                            TLSConfiguration                      `yaml:"tls,omitempty"`
 	CacheControl                   CacheControlPolicy                    `yaml:"cache_control_policy"`

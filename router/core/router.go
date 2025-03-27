@@ -15,26 +15,18 @@ import (
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/nats-io/nuid"
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/propagation"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
 	"github.com/wundergraph/cosmo/router/internal/debug"
 	"github.com/wundergraph/cosmo/router/internal/graphiql"
-	"github.com/wundergraph/cosmo/router/internal/graphqlmetrics"
 	"github.com/wundergraph/cosmo/router/internal/retrytransport"
 	"github.com/wundergraph/cosmo/router/pkg/config"
 	"github.com/wundergraph/cosmo/router/pkg/execution_config"
 	"github.com/wundergraph/cosmo/router/pkg/health"
-	rmetric "github.com/wundergraph/cosmo/router/pkg/metric"
-	"github.com/wundergraph/cosmo/router/pkg/otel/otelconfig"
 	"github.com/wundergraph/cosmo/router/pkg/statistics"
-	rtrace "github.com/wundergraph/cosmo/router/pkg/trace"
 	"github.com/wundergraph/cosmo/router/pkg/watcher"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/netpoll"
 )
@@ -115,16 +107,9 @@ type (
 		clusterName                    string
 		instanceID                     string
 		logger                         *zap.Logger
-		traceConfig                    *rtrace.Config
-		metricConfig                   *rmetric.Config
-		tracerProvider                 *sdktrace.TracerProvider
-		otlpMeterProvider              *sdkmetric.MeterProvider
-		promMeterProvider              *sdkmetric.MeterProvider
-		gqlMetricsExporter             *graphqlmetrics.Exporter
 		setConfigVersionHeader         bool
 		routerGracePeriod              time.Duration
 		staticExecutionConfig          *nodev1.RouterConfig
-		awsLambda                      bool
 		shutdown                       atomic.Bool
 		bootstrapped                   atomic.Bool
 		listenAddr                     string
@@ -142,7 +127,6 @@ type (
 		cacheControlPolicy             config.CacheControlPolicy
 		apolloCompatibilityFlags       config.ApolloCompatibilityFlags
 		apolloRouterCompatibilityFlags config.ApolloRouterCompatibilityFlags
-		prometheusServer               *http.Server
 		modulesConfig                  map[string]interface{}
 		executionConfig                *ExecutionConfig
 		routerOnRequestHandlers        []func(http.Handler) http.Handler
@@ -160,9 +144,6 @@ type (
 		accessLogsConfig               *AccessLogsConfig
 		tlsServerConfig                *tls.Config
 		tlsConfig                      *TlsConfig
-		telemetryAttributes            []config.CustomAttribute
-		tracePropagators               []propagation.TextMapPropagator
-		compositePropagator            propagation.TextMapPropagator
 		customModules                  []Module
 		engineExecutionConfiguration   config.EngineExecutionConfiguration
 		// should be removed once the users have migrated to the new overrides config
@@ -223,22 +204,6 @@ func NewRouter(opts ...Option) (*Router, error) {
 	}
 
 	r.processStartTime = time.Now()
-
-	// Create noop tracer and meter to avoid nil pointer panics and to avoid checking for nil everywhere
-
-	r.tracerProvider = sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.NeverSample()))
-	r.otlpMeterProvider = sdkmetric.NewMeterProvider()
-	r.promMeterProvider = sdkmetric.NewMeterProvider()
-
-	// Default values for trace and metric config
-
-	if r.traceConfig == nil {
-		r.traceConfig = rtrace.DefaultConfig(Version)
-	}
-
-	if r.metricConfig == nil {
-		r.metricConfig = rmetric.DefaultConfig(Version)
-	}
 
 	if r.subgraphTransportOptions == nil {
 		r.subgraphTransportOptions = DefaultSubgraphTransportOptions()
@@ -372,45 +337,6 @@ func NewRouter(opts ...Option) (*Router, error) {
 		}
 	}
 
-	if r.traceConfig.Enabled {
-		if len(r.traceConfig.Propagators) > 0 {
-			propagators, err := rtrace.BuildPropagators(r.traceConfig.Propagators...)
-			if err != nil {
-				r.logger.Error("creating propagators", zap.Error(err))
-				return nil, err
-			}
-
-			r.tracePropagators = propagators
-		}
-
-		// Add default tracing exporter if needed
-		if len(r.traceConfig.Exporters) == 0 && r.traceConfig.TestMemoryExporter == nil {
-			if endpoint := otelconfig.DefaultEndpoint(); endpoint != "" {
-				r.logger.Debug("Using default trace exporter", zap.String("endpoint", endpoint))
-				r.traceConfig.Exporters = append(r.traceConfig.Exporters, &rtrace.ExporterConfig{
-					Endpoint: endpoint,
-					Exporter: otelconfig.ExporterOLTPHTTP,
-					HTTPPath: "/v1/traces",
-					Headers:  map[string]string{},
-				})
-			}
-		}
-
-	}
-
-	// Add default metric exporter if none are configured
-	if r.metricConfig.OpenTelemetry.Enabled && len(r.metricConfig.OpenTelemetry.Exporters) == 0 && r.metricConfig.OpenTelemetry.TestReader == nil {
-		if endpoint := otelconfig.DefaultEndpoint(); endpoint != "" {
-			r.logger.Debug("Using default metrics exporter", zap.String("endpoint", endpoint))
-			r.metricConfig.OpenTelemetry.Exporters = append(r.metricConfig.OpenTelemetry.Exporters, &rmetric.OpenTelemetryExporter{
-				Endpoint: endpoint,
-				Exporter: otelconfig.ExporterOLTPHTTP,
-				HTTPPath: "/v1/metrics",
-				Headers:  map[string]string{},
-			})
-		}
-	}
-
 	var disabledFeatures []string
 
 	// The user might want to start the server with a static config
@@ -419,21 +345,6 @@ func NewRouter(opts ...Option) (*Router, error) {
 	disabledFeatures = append(disabledFeatures, "Schema Usage Tracking", "Persistent operations")
 	if !r.developmentMode {
 		disabledFeatures = append(disabledFeatures, "Advanced Request Tracing")
-	}
-
-	if r.traceConfig.Enabled {
-		defaultExporter := rtrace.DefaultExporter(r.traceConfig)
-		if defaultExporter != nil {
-			disabledFeatures = append(disabledFeatures, "Cosmo Cloud Tracing")
-			defaultExporter.Disabled = true
-		}
-	}
-	if r.metricConfig.OpenTelemetry.Enabled {
-		defaultExporter := rmetric.GetDefaultExporter(r.metricConfig)
-		if defaultExporter != nil {
-			disabledFeatures = append(disabledFeatures, "Cosmo Cloud Metrics")
-			defaultExporter.Disabled = true
-		}
 	}
 
 	r.logger.Warn("No graph token provided. The following Cosmo Cloud features are disabled. Not recommended for Production.",
@@ -575,13 +486,6 @@ func (r *Router) initModules(ctx context.Context) error {
 			r.postOriginHandlers = append(r.postOriginHandlers, handler.OnOriginResponse)
 		}
 
-		if handler, ok := moduleInstance.(TracePropagationProvider); ok {
-			modulePropagators := handler.TracePropagators()
-			if len(modulePropagators) > 0 {
-				r.tracePropagators = append(r.tracePropagators, modulePropagators...)
-			}
-		}
-
 		r.modules = append(r.modules, moduleInstance)
 
 		r.logger.Info("Module registered",
@@ -637,50 +541,6 @@ func (r *Router) bootstrap(ctx context.Context) error {
 		return fmt.Errorf("router is already bootstrapped")
 	}
 
-	if r.traceConfig.Enabled {
-		tp, err := rtrace.NewTracerProvider(ctx, &rtrace.ProviderConfig{
-			Logger:            r.logger,
-			Config:            r.traceConfig,
-			ServiceInstanceID: r.instanceID,
-			MemoryExporter:    r.traceConfig.TestMemoryExporter,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to start trace agent: %w", err)
-		}
-		r.tracerProvider = tp
-	}
-
-	// Prometheus metrics rely on OTLP metrics
-	if r.metricConfig.IsEnabled() {
-		if r.metricConfig.Prometheus.Enabled {
-			mp, registry, err := rmetric.NewPrometheusMeterProvider(ctx, r.metricConfig, r.instanceID)
-			if err != nil {
-				return fmt.Errorf("failed to create Prometheus exporter: %w", err)
-			}
-			r.promMeterProvider = mp
-
-			r.prometheusServer = rmetric.NewPrometheusServer(r.logger, r.metricConfig.Prometheus.ListenAddr, r.metricConfig.Prometheus.Path, registry)
-			go func() {
-				if err := r.prometheusServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-					r.logger.Error("Failed to start Prometheus server", zap.Error(err))
-				}
-			}()
-		}
-
-		if r.metricConfig.OpenTelemetry.Enabled {
-			mp, err := rmetric.NewOtlpMeterProvider(ctx, r.logger, r.metricConfig, r.instanceID)
-			if err != nil {
-				return fmt.Errorf("failed to start trace agent: %w", err)
-			}
-			r.otlpMeterProvider = mp
-		}
-
-	}
-
-	if r.metricConfig.OpenTelemetry.EngineStats.Enabled() || r.metricConfig.Prometheus.EngineStats.Enabled() || r.engineExecutionConfiguration.Debug.ReportWebSocketConnections {
-		r.EngineStats = statistics.NewEngineStats(ctx, r.logger, r.engineExecutionConfiguration.Debug.ReportWebSocketConnections)
-	}
-
 	if r.engineExecutionConfiguration.Debug.ReportMemoryUsage {
 		debug.ReportMemoryUsage(ctx, r.logger)
 	}
@@ -710,16 +570,6 @@ func (r *Router) bootstrap(ctx context.Context) error {
 	// Modules are only initialized once and not on every config change
 	if err := r.initModules(ctx); err != nil {
 		return fmt.Errorf("failed to init user modules: %w", err)
-	}
-
-	if r.traceConfig.Enabled && len(r.tracePropagators) > 0 {
-		r.compositePropagator = propagation.NewCompositeTextMapPropagator(r.tracePropagators...)
-
-		// Don't set it globally when we use the router in tests.
-		// In practice, setting it globally only makes sense for module development.
-		if r.traceConfig.TestMemoryExporter == nil {
-			otel.SetTextMapPropagator(r.compositePropagator)
-		}
 	}
 
 	return nil
@@ -855,65 +705,6 @@ func (r *Router) Shutdown(ctx context.Context) (err error) {
 	}
 
 	var wg sync.WaitGroup
-
-	if r.prometheusServer != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if subErr := r.prometheusServer.Close(); subErr != nil {
-				err = errors.Join(err, fmt.Errorf("failed to shutdown prometheus server: %w", subErr))
-			}
-		}()
-	}
-
-	if r.tracerProvider != nil {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			if subErr := r.tracerProvider.Shutdown(ctx); subErr != nil {
-				err = errors.Join(err, fmt.Errorf("failed to shutdown tracer: %w", subErr))
-			}
-		}()
-	}
-
-	if r.gqlMetricsExporter != nil {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			if subErr := r.gqlMetricsExporter.Shutdown(ctx); subErr != nil {
-				err = errors.Join(err, fmt.Errorf("failed to shutdown graphql metrics exporter: %w", subErr))
-			}
-		}()
-	}
-
-	if r.promMeterProvider != nil {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			if subErr := r.promMeterProvider.Shutdown(ctx); subErr != nil {
-				err = errors.Join(err, fmt.Errorf("failed to shutdown prometheus meter provider: %w", subErr))
-			}
-		}()
-	}
-
-	if r.otlpMeterProvider != nil {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			if subErr := r.otlpMeterProvider.Shutdown(ctx); subErr != nil {
-				err = errors.Join(err, fmt.Errorf("failed to shutdown OTLP meter provider: %w", subErr))
-			}
-		}()
-	}
-
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -962,12 +753,6 @@ func WithQueryPlans(enabled bool) Option {
 	}
 }
 
-func WithTracing(cfg *rtrace.Config) Option {
-	return func(r *Router) {
-		r.traceConfig = cfg
-	}
-}
-
 // WithMultipartHeartbeatInterval sets the interval for the engine to send heartbeats for multipart subscriptions.
 func WithMultipartHeartbeatInterval(interval time.Duration) Option {
 	return func(r *Router) {
@@ -1000,13 +785,6 @@ func WithPlaygroundConfig(c config.PlaygroundConfig) Option {
 func WithGracePeriod(timeout time.Duration) Option {
 	return func(r *Router) {
 		r.routerGracePeriod = timeout
-	}
-}
-
-// WithMetrics sets the metrics configuration for the router.
-func WithMetrics(cfg *rmetric.Config) Option {
-	return func(r *Router) {
-		r.metricConfig = cfg
 	}
 }
 
@@ -1227,12 +1005,6 @@ func WithTLSConfig(cfg *TlsConfig) Option {
 	}
 }
 
-func WithTelemetryAttributes(attributes []config.CustomAttribute) Option {
-	return func(r *Router) {
-		r.telemetryAttributes = attributes
-	}
-}
-
 func WithApolloCompatibilityFlagsConfig(cfg config.ApolloCompatibilityFlags) Option {
 	return func(r *Router) {
 		if cfg.EnableAll {
@@ -1291,56 +1063,6 @@ func newHTTPTransport(opts *TransportRequestOptions) *http.Transport {
 	}
 }
 
-func TraceConfigFromTelemetry(cfg *config.Telemetry) *rtrace.Config {
-	var exporters []*rtrace.ExporterConfig
-	for _, exp := range cfg.Tracing.Exporters {
-		exporters = append(exporters, &rtrace.ExporterConfig{
-			Disabled:      exp.Disabled,
-			Endpoint:      exp.Endpoint,
-			Exporter:      exp.Exporter,
-			BatchTimeout:  exp.BatchTimeout,
-			ExportTimeout: exp.ExportTimeout,
-			Headers:       exp.Headers,
-			HTTPPath:      exp.HTTPPath,
-		})
-	}
-
-	var propagators []rtrace.Propagator
-
-	if cfg.Tracing.Propagation.TraceContext {
-		propagators = append(propagators, rtrace.PropagatorTraceContext)
-	}
-	if cfg.Tracing.Propagation.B3 {
-		propagators = append(propagators, rtrace.PropagatorB3)
-	}
-	if cfg.Tracing.Propagation.Jaeger {
-		propagators = append(propagators, rtrace.PropagatorJaeger)
-	}
-	if cfg.Tracing.Propagation.Datadog {
-		propagators = append(propagators, rtrace.PropagatorDatadog)
-	}
-	if cfg.Tracing.Propagation.Baggage {
-		propagators = append(propagators, rtrace.PropagatorBaggage)
-	}
-
-	return &rtrace.Config{
-		Enabled:            cfg.Tracing.Enabled,
-		Name:               cfg.ServiceName,
-		Version:            Version,
-		Sampler:            cfg.Tracing.SamplingRate,
-		ParentBasedSampler: cfg.Tracing.ParentBasedSampler,
-		WithNewRoot:        cfg.Tracing.WithNewRoot,
-		Attributes:         nil,
-		ExportGraphQLVariables: rtrace.ExportGraphQLVariables{
-			Enabled: cfg.Tracing.ExportGraphQLVariables,
-		},
-		ResourceAttributes:  buildResourceAttributes(cfg.ResourceAttributes),
-		Exporters:           exporters,
-		Propagators:         propagators,
-		ResponseTraceHeader: cfg.Tracing.ResponseTraceHeader,
-	}
-}
-
 // buildAttributesMap returns a map of custom attributes to quickly check if a field is used in the custom attributes.
 func buildAttributesMap(attributes []config.CustomAttribute) map[string]string {
 	result := make(map[string]string)
@@ -1389,50 +1111,6 @@ func buildResourceAttributes(attributes []config.CustomStaticAttribute) []attrib
 	}
 	r := attribute.NewSet(result...)
 	return r.ToSlice()
-}
-
-func MetricConfigFromTelemetry(cfg *config.Telemetry) *rmetric.Config {
-	var openTelemetryExporters []*rmetric.OpenTelemetryExporter
-	for _, exp := range cfg.Metrics.OTLP.Exporters {
-		openTelemetryExporters = append(openTelemetryExporters, &rmetric.OpenTelemetryExporter{
-			Disabled:    exp.Disabled,
-			Endpoint:    exp.Endpoint,
-			Exporter:    exp.Exporter,
-			Headers:     exp.Headers,
-			HTTPPath:    exp.HTTPPath,
-			Temporality: exp.Temporality,
-		})
-	}
-
-	return &rmetric.Config{
-		Name:               cfg.ServiceName,
-		Version:            Version,
-		Attributes:         cfg.Metrics.Attributes,
-		ResourceAttributes: buildResourceAttributes(cfg.ResourceAttributes),
-		OpenTelemetry: rmetric.OpenTelemetry{
-			Enabled:       cfg.Metrics.OTLP.Enabled,
-			RouterRuntime: cfg.Metrics.OTLP.RouterRuntime,
-			GraphqlCache:  cfg.Metrics.OTLP.GraphqlCache,
-			EngineStats: rmetric.EngineStatsConfig{
-				Subscription: cfg.Metrics.OTLP.EngineStats.Subscriptions,
-			},
-			Exporters:           openTelemetryExporters,
-			ExcludeMetrics:      cfg.Metrics.OTLP.ExcludeMetrics,
-			ExcludeMetricLabels: cfg.Metrics.OTLP.ExcludeMetricLabels,
-		},
-		Prometheus: rmetric.PrometheusConfig{
-			Enabled:      cfg.Metrics.Prometheus.Enabled,
-			ListenAddr:   cfg.Metrics.Prometheus.ListenAddr,
-			Path:         cfg.Metrics.Prometheus.Path,
-			GraphqlCache: cfg.Metrics.Prometheus.GraphqlCache,
-			EngineStats: rmetric.EngineStatsConfig{
-				Subscription: cfg.Metrics.Prometheus.EngineStats.Subscriptions,
-			},
-			ExcludeMetrics:      cfg.Metrics.Prometheus.ExcludeMetrics,
-			ExcludeMetricLabels: cfg.Metrics.Prometheus.ExcludeMetricLabels,
-			ExcludeScopeInfo:    cfg.Metrics.Prometheus.ExcludeScopeInfo,
-		},
-	}
 }
 
 func or[T any](maybe *T, or T) T {

@@ -11,19 +11,14 @@ import (
 	"strings"
 
 	rErrors "github.com/wundergraph/cosmo/router/internal/errors"
-	rotel "github.com/wundergraph/cosmo/router/pkg/otel"
-	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/graphql_datasource"
-
-	"github.com/wundergraph/graphql-go-tools/v2/pkg/graphqlerrors"
-
-	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
-
 	"github.com/wundergraph/cosmo/router/pkg/config"
 	"github.com/wundergraph/cosmo/router/pkg/statistics"
+	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/graphql_datasource"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/plan"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
+	"github.com/wundergraph/graphql-go-tools/v2/pkg/graphqlerrors"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/operationreport"
+	"go.uber.org/zap"
 )
 
 var (
@@ -71,7 +66,6 @@ type HandlerOptions struct {
 	EnableNormalizationCacheResponseHeader      bool
 	EnableResponseHeaderPropagation             bool
 	EngineStats                                 statistics.EngineStatistics
-	TracerProvider                              trace.TracerProvider
 	Authorizer                                  *CosmoAuthorizer
 	SubgraphErrorPropagation                    config.SubgraphErrorPropagationConfiguration
 	EngineLoaderHooks                           resolve.LoaderHooks
@@ -87,14 +81,10 @@ func NewGraphQLHandler(opts HandlerOptions) *GraphQLHandler {
 		enableNormalizationCacheResponseHeader:      opts.EnableNormalizationCacheResponseHeader,
 		enableResponseHeaderPropagation:             opts.EnableResponseHeaderPropagation,
 		engineStats:                                 opts.EngineStats,
-		tracer: opts.TracerProvider.Tracer(
-			"wundergraph/cosmo/router/graphql_handler",
-			trace.WithInstrumentationVersion("0.0.1"),
-		),
-		authorizer:                               opts.Authorizer,
-		subgraphErrorPropagation:                 opts.SubgraphErrorPropagation,
-		engineLoaderHooks:                        opts.EngineLoaderHooks,
-		apolloSubscriptionMultipartPrintBoundary: opts.ApolloSubscriptionMultipartPrintBoundary,
+		authorizer:                                  opts.Authorizer,
+		subgraphErrorPropagation:                    opts.SubgraphErrorPropagation,
+		engineLoaderHooks:                           opts.EngineLoaderHooks,
+		apolloSubscriptionMultipartPrintBoundary:    opts.ApolloSubscriptionMultipartPrintBoundary,
 	}
 	return graphQLHandler
 }
@@ -113,7 +103,6 @@ type GraphQLHandler struct {
 	log                      *zap.Logger
 	executor                 *Executor
 	engineStats              statistics.EngineStatistics
-	tracer                   trace.Tracer
 	authorizer               *CosmoAuthorizer
 	subgraphErrorPropagation config.SubgraphErrorPropagationConfiguration
 	engineLoaderHooks        resolve.LoaderHooks
@@ -127,12 +116,7 @@ type GraphQLHandler struct {
 
 func (h *GraphQLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestContext := getRequestContext(r.Context())
-
-	executionContext, graphqlExecutionSpan := h.tracer.Start(r.Context(), "Operation - Execute",
-		trace.WithSpanKind(trace.SpanKindInternal),
-		trace.WithAttributes(requestContext.telemetry.traceAttrs...),
-	)
-	defer graphqlExecutionSpan.End()
+	executionContext := r.Context()
 
 	ctx := &resolve.Context{
 		Variables:      requestContext.operation.variables,
@@ -168,7 +152,7 @@ func (h *GraphQLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		defer propagateSubgraphErrors(ctx)
 
-		resp, err := h.executor.Resolver.ResolveGraphQLResponse(ctx, p.Response, nil, HeaderPropagationWriter(w, ctx.Context()))
+		_, err := h.executor.Resolver.ResolveGraphQLResponse(ctx, p.Response, nil, HeaderPropagationWriter(w, ctx.Context()))
 		requestContext.dataSourceNames = getSubgraphNames(p.Response.DataSources)
 
 		if err != nil {
@@ -177,7 +161,6 @@ func (h *GraphQLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		graphqlExecutionSpan.SetAttributes(rotel.WgAcquireResolverWaitTimeMs.Int64(resp.ResolveAcquireWaitTime.Milliseconds()))
 	case *plan.SubscriptionResponsePlan:
 		var (
 			writer resolve.SubscriptionResponseWriter

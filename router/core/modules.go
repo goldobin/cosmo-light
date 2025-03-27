@@ -3,7 +3,6 @@ package core
 import (
 	stdContext "context"
 	"fmt"
-	"go.opentelemetry.io/otel/propagation"
 	"math"
 	"net/http"
 	"sort"
@@ -132,14 +131,6 @@ type EnginePostOriginHandler interface {
 	// OnOriginResponse is called after the request is sent to the origin.
 	// Might be called multiple times if there are multiple origins
 	OnOriginResponse(resp *http.Response, ctx RequestContext) *http.Response
-}
-
-// TracePropagationProvider is an interface that allows you to provide custom trace propagators.
-// The trace propagators are used to inject and extract trace information from the request.
-// The provided propagators will be used in addition to the configured propagators.
-type TracePropagationProvider interface {
-	// TracePropagators returns the custom trace propagators which should be used by the router.
-	TracePropagators() []propagation.TextMapPropagator
 }
 
 // Provisioner is called before the server starts

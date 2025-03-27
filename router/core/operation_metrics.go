@@ -3,12 +3,9 @@ package core
 import (
 	"time"
 
-	rotel "github.com/wundergraph/cosmo/router/pkg/otel"
 	otelmetric "go.opentelemetry.io/otel/metric"
 
 	"go.uber.org/zap"
-
-	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -35,17 +32,8 @@ type OperationMetrics struct {
 	trackUsageInfo       bool
 }
 
-func (m *OperationMetrics) Finish(reqContext *requestContext, statusCode int) {
+func (m *OperationMetrics) Finish() {
 	m.inflightMetric()
-
-	attrs := *reqContext.telemetry.AcquireAttributes()
-	defer reqContext.telemetry.ReleaseAttributes(&attrs)
-
-	attrs = append(attrs, semconv.HTTPStatusCode(statusCode))
-	attrs = append(attrs, reqContext.telemetry.metricAttrs...)
-	if reqContext.error != nil {
-		attrs = append(attrs, rotel.WgRequestError.Bool(true))
-	}
 }
 
 type OperationMetricsOptions struct {

@@ -37,7 +37,6 @@ import (
 	"github.com/wundergraph/cosmo/router/pkg/config"
 	"github.com/wundergraph/cosmo/router/pkg/logging"
 	"github.com/wundergraph/cosmo/router/pkg/statistics"
-	rtrace "github.com/wundergraph/cosmo/router/pkg/trace"
 )
 
 var (
@@ -60,7 +59,6 @@ type WebsocketMiddlewareOptions struct {
 
 	WebSocketConfiguration *config.WebSocketConfiguration
 	ClientHeader           config.ClientHeader
-	Attributes             []attribute.KeyValue
 
 	DisableVariablesRemapping bool
 
@@ -82,7 +80,6 @@ func NewWebsocketMiddleware(ctx context.Context, opts WebsocketMiddlewareOptions
 		config:                    opts.WebSocketConfiguration,
 		clientHeader:              opts.ClientHeader,
 		handlerSem:                semaphore.NewWeighted(128),
-		attributes:                opts.Attributes,
 		disableVariablesRemapping: opts.DisableVariablesRemapping,
 		apolloCompatibilityFlags:  opts.ApolloCompatibilityFlags,
 	}
@@ -232,9 +229,7 @@ func (h *WebsocketHandler) handleUpgradeRequest(w http.ResponseWriter, r *http.R
 
 	requestID := middleware.GetReqID(r.Context())
 	requestContext := getRequestContext(r.Context())
-
-	requestLogger := h.logger.With(logging.WithRequestID(requestID), logging.WithTraceID(rtrace.GetTraceID(r.Context())))
-	clientInfo := NewClientInfoFromRequest(r, h.clientHeader)
+	requestLogger := h.logger.With(logging.WithRequestID(requestID))
 
 	if h.accessController != nil && !h.config.Authentication.FromInitialPayload.Enabled {
 		// Check access control before upgrading the connection
@@ -289,7 +284,7 @@ func (h *WebsocketHandler) handleUpgradeRequest(w http.ResponseWriter, r *http.R
 	// We can parse the request options before creating the handler
 	// this avoids touching the client request across goroutines
 
-	executionOptions, traceOptions, err := h.preHandler.parseRequestOptions(r, clientInfo, requestLogger)
+	executionOptions, traceOptions, err := h.preHandler.parseRequestOptions()
 	if err != nil {
 		requestLogger.Error("Parse request options", zap.Error(err))
 		_ = c.Close()
@@ -297,7 +292,6 @@ func (h *WebsocketHandler) handleUpgradeRequest(w http.ResponseWriter, r *http.R
 	}
 
 	planOptions := PlanOptions{
-		ClientInfo:           clientInfo,
 		TraceOptions:         traceOptions,
 		ExecutionOptions:     executionOptions,
 		TrackSchemaUsageInfo: h.preHandler.trackSchemaUsageInfo,
@@ -316,7 +310,6 @@ func (h *WebsocketHandler) handleUpgradeRequest(w http.ResponseWriter, r *http.R
 		Logger:                    requestLogger,
 		Stats:                     h.stats,
 		ConnectionID:              h.connectionIDs.Inc(),
-		ClientInfo:                clientInfo,
 		InitRequestID:             requestID,
 		Config:                    h.config,
 		ForwardUpgradeHeaders:     h.forwardUpgradeHeadersConfig,
@@ -655,7 +648,6 @@ type WebSocketConnectionHandlerOptions struct {
 	Stats                     statistics.EngineStatistics
 	PlanOptions               PlanOptions
 	ConnectionID              int64
-	ClientInfo                *ClientInfo
 	InitRequestID             string
 	ForwardUpgradeHeaders     forwardConfig
 	ForwardQueryParams        forwardConfig
@@ -674,11 +666,10 @@ type WebSocketConnectionHandler struct {
 	w                  http.ResponseWriter
 	// request is the original client request. It is not safe for concurrent use.
 	// You have to clone it before using it in a goroutine.
-	request    *http.Request
-	conn       *wsConnectionWrapper
-	protocol   wsproto.Proto
-	clientInfo *ClientInfo
-	logger     *zap.Logger
+	request  *http.Request
+	conn     *wsConnectionWrapper
+	protocol wsproto.Proto
+	logger   *zap.Logger
 
 	initialPayload            json.RawMessage
 	upgradeRequestHeaders     json.RawMessage
@@ -729,7 +720,6 @@ func NewWebsocketConnectionHandler(ctx context.Context, opts WebSocketConnection
 		logger:                    opts.Logger,
 		connectionID:              opts.ConnectionID,
 		stats:                     opts.Stats,
-		clientInfo:                opts.ClientInfo,
 		initRequestID:             opts.InitRequestID,
 		forwardUpgradeHeaders:     &opts.ForwardUpgradeHeaders,
 		forwardQueryParams:        &opts.ForwardQueryParams,
@@ -911,11 +901,10 @@ func (h *WebSocketConnectionHandler) executeSubscription(registration *Subscript
 	}
 
 	reqContext := buildRequestContext(requestContextOptions{
-		operationContext:    operationCtx,
-		requestLogger:       h.logger,
-		metricSetAttributes: nil,
-		w:                   nil,
-		r:                   registration.clientRequest,
+		operationContext: operationCtx,
+		requestLogger:    h.logger,
+		w:                nil,
+		r:                registration.clientRequest,
 	})
 	resolveCtx = resolveCtx.WithContext(withRequestContext(h.ctx, reqContext))
 	if h.graphqlHandler.authorizer != nil {

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"github.com/wundergraph/cosmo/router/internal/errors"
 	"github.com/wundergraph/cosmo/router/pkg/config"
-	"github.com/wundergraph/cosmo/router/pkg/logging"
-	rtrace "github.com/wundergraph/cosmo/router/pkg/trace"
 	"net"
 	"net/http"
 	"time"
@@ -203,13 +201,6 @@ func (al *accessLogger) getRequestFields(r *http.Request) []zapcore.Field {
 
 	if al.timeFormat != "" {
 		fields = append(fields, zap.String("time", start.Format(al.timeFormat)))
-	}
-
-	if al.traceID {
-		traceID := rtrace.GetTraceID(r.Context())
-		if traceID != "" {
-			fields = append(fields, logging.WithTraceID(traceID))
-		}
 	}
 
 	return fields

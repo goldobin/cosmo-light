@@ -10,28 +10,11 @@ import (
 	"strconv"
 	"sync"
 
-	"go.opentelemetry.io/otel/propagation"
-
-	otelmetric "go.opentelemetry.io/otel/metric"
-
+	"github.com/wundergraph/cosmo/router/internal/retrytransport"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/httpclient"
-	"go.opentelemetry.io/otel/attribute"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-
-	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
-
-	"github.com/wundergraph/cosmo/router/pkg/metric"
-	"github.com/wundergraph/cosmo/router/pkg/otel"
-	"github.com/wundergraph/cosmo/router/pkg/trace"
-
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/pool"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	otrace "go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
-
-	"github.com/wundergraph/cosmo/router/internal/docker"
-	"github.com/wundergraph/cosmo/router/internal/retrytransport"
 )
 
 type (
@@ -43,7 +26,6 @@ type CustomTransport struct {
 	roundTripper http.RoundTripper
 	preHandlers  []TransportPreHandler
 	postHandlers []TransportPostHandler
-	metricStore  metric.Store
 	logger       *zap.Logger
 
 	sf   map[uint64]*sfCacheItem
@@ -61,12 +43,9 @@ func NewCustomTransport(
 	logger *zap.Logger,
 	roundTripper http.RoundTripper,
 	retryOptions retrytransport.RetryOptions,
-	metricStore metric.Store,
 	enableSingleFlight bool,
 ) *CustomTransport {
-	ct := &CustomTransport{
-		metricStore: metricStore,
-	}
+	ct := &CustomTransport{}
 
 	if retryOptions.Enabled {
 		// The round trip method is almost always called via the http.Client RoundTripper interface
@@ -90,46 +69,6 @@ func NewCustomTransport(
 	return ct
 }
 
-func (ct *CustomTransport) measureSubgraphMetrics(req *http.Request) func(err error, resp *http.Response) {
-	reqContext := getRequestContext(req.Context())
-	activeSubgraph := reqContext.ActiveSubgraph(req)
-
-	attributes := *reqContext.telemetry.AcquireAttributes()
-
-	if activeSubgraph != nil {
-		attributes = append(attributes,
-			otel.WgSubgraphName.String(activeSubgraph.Name),
-			otel.WgSubgraphID.String(activeSubgraph.Id),
-		)
-	}
-
-	attributes = append(attributes, reqContext.telemetry.metricAttrs...)
-	if reqContext.telemetry.metricAttributeExpressions != nil {
-		additionalAttrs, err := reqContext.telemetry.metricAttributeExpressions.expressionsAttributes(reqContext)
-		if err != nil {
-			ct.logger.Error("failed to resolve metric attribute expressions", zap.Error(err))
-		}
-		attributes = append(attributes, additionalAttrs...)
-	}
-	o := otelmetric.WithAttributeSet(attribute.NewSet(attributes...))
-
-	inFlightDone := ct.metricStore.MeasureInFlight(req.Context(), reqContext.telemetry.metricSliceAttrs, o)
-	ct.metricStore.MeasureRequestSize(req.Context(), req.ContentLength, reqContext.telemetry.metricSliceAttrs, o)
-
-	return func(err error, resp *http.Response) {
-		defer reqContext.telemetry.ReleaseAttributes(&attributes)
-
-		inFlightDone()
-
-		if resp != nil {
-			attributes = append(attributes, semconv.HTTPStatusCode(resp.StatusCode))
-			o = otelmetric.WithAttributeSet(attribute.NewSet(attributes...))
-
-			ct.metricStore.MeasureResponseSize(req.Context(), resp.ContentLength, reqContext.telemetry.metricSliceAttrs, o)
-		}
-	}
-}
-
 // RoundTrip of the engine upstream requests. The handler is called concurrently for each request.
 // Be aware that multiple modules can be active at the same time. Must be concurrency safe.
 func (ct *CustomTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
@@ -137,11 +76,6 @@ func (ct *CustomTransport) RoundTrip(req *http.Request) (resp *http.Response, er
 		requestContext: getRequestContext(req.Context()),
 		sendError:      nil,
 	}
-
-	done := ct.measureSubgraphMetrics(req)
-	defer func() {
-		done(err, resp)
-	}()
 
 	if ct.preHandlers != nil {
 		for _, preHandler := range ct.preHandlers {
@@ -312,15 +246,11 @@ func (ct *CustomTransport) singleFlightKey(req *http.Request) uint64 {
 }
 
 type TransportFactory struct {
-	preHandlers                   []TransportPreHandler
-	postHandlers                  []TransportPostHandler
-	subgraphTransportOptions      *SubgraphTransportOptions
-	retryOptions                  retrytransport.RetryOptions
-	localhostFallbackInsideDocker bool
-	metricStore                   metric.Store
-	logger                        *zap.Logger
-	tracerProvider                *sdktrace.TracerProvider
-	tracePropagators              propagation.TextMapPropagator
+	preHandlers              []TransportPreHandler
+	postHandlers             []TransportPostHandler
+	subgraphTransportOptions *SubgraphTransportOptions
+	retryOptions             retrytransport.RetryOptions
+	logger                   *zap.Logger
 }
 
 var _ ApiTransportFactory = TransportFactory{}
@@ -330,10 +260,7 @@ type TransportOptions struct {
 	PostHandlers             []TransportPostHandler
 	SubgraphTransportOptions *SubgraphTransportOptions
 	RetryOptions             retrytransport.RetryOptions
-	MetricStore              metric.Store
 	Logger                   *zap.Logger
-	TracerProvider           *sdktrace.TracerProvider
-	TracePropagators         propagation.TextMapPropagator
 }
 
 func NewTransport(opts *TransportOptions) *TransportFactory {
@@ -342,10 +269,7 @@ func NewTransport(opts *TransportOptions) *TransportFactory {
 		postHandlers:             opts.PostHandlers,
 		retryOptions:             opts.RetryOptions,
 		subgraphTransportOptions: opts.SubgraphTransportOptions,
-		metricStore:              opts.MetricStore,
 		logger:                   opts.Logger,
-		tracerProvider:           opts.TracerProvider,
-		tracePropagators:         opts.TracePropagators,
 	}
 }
 
@@ -354,45 +278,10 @@ func (t TransportFactory) RoundTripper(enableSingleFlight bool, baseTransport ht
 		baseTransport = NewSubgraphTransport(t.subgraphTransportOptions, baseTransport, t.logger)
 	}
 
-	if t.localhostFallbackInsideDocker && docker.Inside() {
-		baseTransport = docker.NewLocalhostFallbackRoundTripper(baseTransport)
-	}
-
-	otelHttpOptions := []otelhttp.Option{
-		otelhttp.WithSpanNameFormatter(SpanNameFormatter),
-		otelhttp.WithSpanOptions(otrace.WithAttributes(otel.EngineTransportAttribute)),
-		otelhttp.WithTracerProvider(t.tracerProvider),
-	}
-
-	if t.tracePropagators != nil {
-		otelHttpOptions = append(otelHttpOptions, otelhttp.WithPropagators(t.tracePropagators))
-	}
-
-	traceTransport := trace.NewTransport(
-		baseTransport,
-		otelHttpOptions,
-		trace.WithPreHandler(func(r *http.Request) {
-			span := otrace.SpanFromContext(r.Context())
-			reqContext := getRequestContext(r.Context())
-
-			var attributes []attribute.KeyValue
-
-			subgraph := reqContext.ActiveSubgraph(r)
-			if subgraph != nil {
-				attributes = append(attributes, otel.WgSubgraphID.String(subgraph.Id))
-				attributes = append(attributes, otel.WgSubgraphName.String(subgraph.Name))
-			}
-
-			attributes = append(attributes, reqContext.telemetry.traceAttrs...)
-
-			span.SetAttributes(attributes...)
-		}),
-	)
 	tp := NewCustomTransport(
 		t.logger,
-		traceTransport,
+		baseTransport,
 		t.retryOptions,
-		t.metricStore,
 		enableSingleFlight,
 	)
 

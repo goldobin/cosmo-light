@@ -14,11 +14,7 @@ import (
 	cachedirective "github.com/pquerna/cachecontrol/cacheobject"
 	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
 	"github.com/wundergraph/cosmo/router/pkg/config"
-	"github.com/wundergraph/cosmo/router/pkg/otel"
-	rtrace "github.com/wundergraph/cosmo/router/pkg/trace"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 var (
@@ -471,17 +467,6 @@ func (h *HeaderPropagation) applyResponseRuleMostRestrictiveCacheControl(res *ht
 	}
 
 	ctx := res.Request.Context()
-	tracer := rtrace.TracerFromContext(ctx)
-	commonAttributes := []attribute.KeyValue{
-		otel.WgOperationProtocol.String(OperationProtocolHTTP.String()),
-	}
-
-	_, span := tracer.Start(ctx, "HeaderPropagation - RestrictiveCacheControl",
-		trace.WithSpanKind(trace.SpanKindInternal),
-		trace.WithAttributes(commonAttributes...),
-	)
-	defer span.End()
-
 	// Set no-cache for all mutations, to ensure that requests to mutate data always work as expected (without returning cached data)
 	if resolve.SingleFlightDisallowed(ctx) {
 		propagation.header.Set(cacheControlKey, noCache)
@@ -515,12 +500,6 @@ func (h *HeaderPropagation) applyResponseRuleMostRestrictiveCacheControl(res *ht
 	rv := cachedirective.ObjectResults{}
 	cachedirective.CachableObject(obj, &rv)
 	cachedirective.ExpirationObject(obj, &rv)
-
-	span.SetAttributes(
-		otel.WgResponseCacheControlReasons.String(fmt.Sprint(rv.OutReasons)),
-		otel.WgResponseCacheControlWarnings.String(fmt.Sprint(rv.OutWarnings)),
-		otel.WgResponseCacheControlExpiration.String(rv.OutExpirationTime.String()),
-	)
 
 	// Add each cache control object to the policies list
 	policies := []*cachedirective.Object{obj}

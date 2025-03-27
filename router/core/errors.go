@@ -12,12 +12,10 @@ import (
 	rErrors "github.com/wundergraph/cosmo/router/internal/errors"
 	"github.com/wundergraph/cosmo/router/internal/unique"
 	"github.com/wundergraph/cosmo/router/pkg/pubsub"
-	rtrace "github.com/wundergraph/cosmo/router/pkg/trace"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/graphql_datasource"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/graphqlerrors"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/operationreport"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -106,7 +104,6 @@ func trackFinalResponseError(ctx context.Context, err error) {
 		return
 	}
 
-	span := trace.SpanFromContext(ctx)
 	requestContext := getRequestContext(ctx)
 	if requestContext == nil {
 		return
@@ -115,8 +112,6 @@ func trackFinalResponseError(ctx context.Context, err error) {
 	requestContext.SetError(err)
 	requestContext.graphQLErrorServices = getAggregatedSubgraphServiceNames(requestContext.error)
 	requestContext.graphQLErrorCodes = getAggregatedSubgraphErrorCodes(requestContext.error)
-
-	rtrace.AttachErrToSpan(span, err)
 }
 
 func getAggregatedSubgraphErrorCodes(err error) []string {

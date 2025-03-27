@@ -11,10 +11,6 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/klauspost/compress/gzhttp"
 	"github.com/klauspost/compress/gzip"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/otel/attribute"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	oteltrace "go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -35,10 +31,7 @@ import (
 	"github.com/wundergraph/cosmo/router/pkg/execution_config"
 	"github.com/wundergraph/cosmo/router/pkg/health"
 	"github.com/wundergraph/cosmo/router/pkg/logging"
-	rmetric "github.com/wundergraph/cosmo/router/pkg/metric"
-	"github.com/wundergraph/cosmo/router/pkg/otel"
 	"github.com/wundergraph/cosmo/router/pkg/statistics"
-	rtrace "github.com/wundergraph/cosmo/router/pkg/trace"
 )
 
 const (
@@ -65,19 +58,15 @@ type (
 		playgroundHandler       func(http.Handler) http.Handler
 		publicKey               *ecdsa.PublicKey
 		executionTransport      *http.Transport
-		baseOtelAttributes      []attribute.KeyValue
 		baseRouterConfigVersion string
 		mux                     *chi.Mux
 		// inFlightRequests is used to track the number of requests currently being processed
 		// does not include websocket (hijacked) connections
-		inFlightRequests        *atomic.Uint64
-		graphMuxList            []*graphMux
-		graphMuxListLock        sync.Mutex
-		runtimeMetrics          *rmetric.RuntimeMetrics
-		otlpEngineMetrics       *rmetric.EngineMetrics
-		prometheusEngineMetrics *rmetric.EngineMetrics
-		hostName                string
-		routerListenAddr        string
+		inFlightRequests *atomic.Uint64
+		graphMuxList     []*graphMux
+		graphMuxListLock sync.Mutex
+		hostName         string
+		routerListenAddr string
 	}
 )
 
@@ -106,34 +95,6 @@ func newGraphServer(ctx context.Context, r *Router, routerConfig *nodev1.RouterC
 		graphMuxList:            make([]*graphMux, 0, 1),
 		routerListenAddr:        r.listenAddr,
 		hostName:                r.hostName,
-	}
-
-	baseOtelAttributes := []attribute.KeyValue{
-		otel.WgRouterVersion.String(Version),
-		otel.WgRouterClusterName.String(r.clusterName),
-	}
-
-	s.baseOtelAttributes = baseOtelAttributes
-
-	if s.metricConfig.OpenTelemetry.RouterRuntime {
-		s.runtimeMetrics = rmetric.NewRuntimeMetrics(
-			s.logger,
-			s.otlpMeterProvider,
-			// We track runtime metrics with base router config version
-			append([]attribute.KeyValue{
-				otel.WgRouterConfigVersion.String(s.baseRouterConfigVersion),
-			}, baseOtelAttributes...),
-			s.processStartTime,
-		)
-
-		// Start runtime metrics
-		if err := s.runtimeMetrics.Start(); err != nil {
-			return nil, err
-		}
-	}
-
-	if err := s.setupEngineStatistics(); err != nil {
-		return nil, fmt.Errorf("failed to setup engine statistics: %w", err)
 	}
 
 	httpRouter := chi.NewRouter()
@@ -269,40 +230,6 @@ func (s *graphServer) buildMultiGraphHandler(ctx context.Context, baseMux *chi.M
 	}, nil
 }
 
-// setupEngineStatistics creates the engine statistics for the server.
-// It creates the OTLP and Prometheus metrics for the engine statistics.
-func (s *graphServer) setupEngineStatistics() (err error) {
-	// We only include the base router config version in the attributes for the engine statistics.
-	// Same approach is used for the runtime metrics.
-	baseAttributes := append([]attribute.KeyValue{
-		otel.WgRouterConfigVersion.String(s.baseRouterConfigVersion),
-	}, s.baseOtelAttributes...)
-
-	s.otlpEngineMetrics, err = rmetric.NewEngineMetrics(
-		s.logger,
-		baseAttributes,
-		s.otlpMeterProvider,
-		s.engineStats,
-		&s.metricConfig.OpenTelemetry.EngineStats,
-	)
-	if err != nil {
-		return err
-	}
-
-	s.prometheusEngineMetrics, err = rmetric.NewEngineMetrics(
-		s.logger,
-		baseAttributes,
-		s.promMeterProvider,
-		s.engineStats,
-		&s.metricConfig.Prometheus.EngineStats,
-	)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 type graphMux struct {
 	mux                        *chi.Mux
 	planCache                  *ristretto.Cache[uint64, *planWithMetaData]
@@ -311,9 +238,6 @@ type graphMux struct {
 	validationCache            *ristretto.Cache[uint64, bool]
 	operationHashCache         *ristretto.Cache[uint64, string]
 	accessLogsFileLogger       *logging.BufferedLogger
-	metricStore                rmetric.Store
-	prometheusCacheMetrics     *rmetric.CacheMetrics
-	otelCacheMetrics           *rmetric.CacheMetrics
 }
 
 // buildOperationCaches creates the caches for the graph mux.
@@ -331,7 +255,7 @@ func (s *graphMux) buildOperationCaches(srv *graphServer) (computeSha256 bool, e
 
 	if srv.engineExecutionConfiguration.ExecutionPlanCacheSize > 0 {
 		planCacheConfig := &ristretto.Config[uint64, *planWithMetaData]{
-			Metrics:            srv.metricConfig.OpenTelemetry.GraphqlCache || srv.metricConfig.Prometheus.GraphqlCache,
+			Metrics:            false,
 			MaxCost:            srv.engineExecutionConfiguration.ExecutionPlanCacheSize,
 			NumCounters:        srv.engineExecutionConfiguration.ExecutionPlanCacheSize * 10,
 			IgnoreInternalCost: true,
@@ -345,7 +269,7 @@ func (s *graphMux) buildOperationCaches(srv *graphServer) (computeSha256 bool, e
 
 	if srv.engineExecutionConfiguration.EnableNormalizationCache && srv.engineExecutionConfiguration.NormalizationCacheSize > 0 {
 		normalizationCacheConfig := &ristretto.Config[uint64, NormalizationCacheEntry]{
-			Metrics:            srv.metricConfig.OpenTelemetry.GraphqlCache || srv.metricConfig.Prometheus.GraphqlCache,
+			Metrics:            false,
 			MaxCost:            srv.engineExecutionConfiguration.NormalizationCacheSize,
 			NumCounters:        srv.engineExecutionConfiguration.NormalizationCacheSize * 10,
 			IgnoreInternalCost: true,
@@ -359,7 +283,7 @@ func (s *graphMux) buildOperationCaches(srv *graphServer) (computeSha256 bool, e
 
 	if srv.engineExecutionConfiguration.EnableValidationCache && srv.engineExecutionConfiguration.ValidationCacheSize > 0 {
 		validationCacheConfig := &ristretto.Config[uint64, bool]{
-			Metrics:            srv.metricConfig.OpenTelemetry.GraphqlCache || srv.metricConfig.Prometheus.GraphqlCache,
+			Metrics:            false,
 			MaxCost:            srv.engineExecutionConfiguration.ValidationCacheSize,
 			NumCounters:        srv.engineExecutionConfiguration.ValidationCacheSize * 10,
 			IgnoreInternalCost: true,
@@ -371,30 +295,13 @@ func (s *graphMux) buildOperationCaches(srv *graphServer) (computeSha256 bool, e
 		}
 	}
 
-	// Currently, we only support custom attributes from the context for OTLP metrics
-	if len(srv.metricConfig.Attributes) > 0 {
-		for _, customAttribute := range srv.metricConfig.Attributes {
-			if customAttribute.ValueFrom != nil && customAttribute.ValueFrom.ContextField == ContextFieldOperationSha256 {
-				computeSha256 = true
-				break
-			}
-		}
-	} else if srv.accessLogsConfig != nil {
-		for _, customAttribute := range append(srv.accessLogsConfig.Attributes, srv.accessLogsConfig.SubgraphAttributes...) {
-			if customAttribute.ValueFrom != nil && customAttribute.ValueFrom.ContextField == ContextFieldOperationSha256 {
-				computeSha256 = true
-				break
-			}
-		}
-	}
-
 	if computeSha256 {
 		operationHashCacheConfig := &ristretto.Config[uint64, string]{
+			Metrics:            false,
 			MaxCost:            srv.engineExecutionConfiguration.OperationHashCacheSize,
 			NumCounters:        srv.engineExecutionConfiguration.OperationHashCacheSize * 10,
 			IgnoreInternalCost: true,
 			BufferItems:        64,
-			Metrics:            srv.metricConfig.OpenTelemetry.GraphqlCache || srv.metricConfig.Prometheus.GraphqlCache,
 		}
 		s.operationHashCache, err = ristretto.NewCache[uint64, string](operationHashCacheConfig)
 		if err != nil {
@@ -403,65 +310,6 @@ func (s *graphMux) buildOperationCaches(srv *graphServer) (computeSha256 bool, e
 	}
 
 	return computeSha256, nil
-}
-
-// configureCacheMetrics sets up the cache metrics for this mux if enabled in the config.
-func (s *graphMux) configureCacheMetrics(srv *graphServer, baseOtelAttributes []attribute.KeyValue) error {
-	if srv.metricConfig.OpenTelemetry.GraphqlCache {
-		cacheMetrics, err := rmetric.NewCacheMetrics(
-			srv.logger,
-			baseOtelAttributes,
-			srv.otlpMeterProvider)
-		if err != nil {
-			return fmt.Errorf("failed to create cache metrics for OTLP: %w", err)
-		}
-
-		s.otelCacheMetrics = cacheMetrics
-	}
-
-	if srv.metricConfig.Prometheus.GraphqlCache {
-		cacheMetrics, err := rmetric.NewCacheMetrics(
-			srv.logger,
-			baseOtelAttributes,
-			srv.promMeterProvider)
-		if err != nil {
-			return fmt.Errorf("failed to create cache metrics for Prometheus: %w", err)
-		}
-
-		s.prometheusCacheMetrics = cacheMetrics
-	}
-
-	var metricInfos []rmetric.CacheMetricInfo
-
-	if s.planCache != nil {
-		metricInfos = append(metricInfos, rmetric.NewCacheMetricInfo("plan", srv.engineExecutionConfiguration.ExecutionPlanCacheSize, s.planCache.Metrics))
-	}
-
-	if s.normalizationCache != nil {
-		metricInfos = append(metricInfos, rmetric.NewCacheMetricInfo("query_normalization", srv.engineExecutionConfiguration.NormalizationCacheSize, s.normalizationCache.Metrics))
-	}
-
-	if s.validationCache != nil {
-		metricInfos = append(metricInfos, rmetric.NewCacheMetricInfo("validation", srv.engineExecutionConfiguration.ValidationCacheSize, s.validationCache.Metrics))
-	}
-
-	if s.operationHashCache != nil {
-		metricInfos = append(metricInfos, rmetric.NewCacheMetricInfo("query_hash", srv.engineExecutionConfiguration.OperationHashCacheSize, s.operationHashCache.Metrics))
-	}
-
-	if s.otelCacheMetrics != nil {
-		if err := s.otelCacheMetrics.RegisterObservers(metricInfos); err != nil {
-			return fmt.Errorf("failed to register observer for OTLP cache metrics: %w", err)
-		}
-	}
-
-	if s.prometheusCacheMetrics != nil {
-		if err := s.prometheusCacheMetrics.RegisterObservers(metricInfos); err != nil {
-			return fmt.Errorf("failed to register observer for Prometheus cache metrics: %w", err)
-		}
-	}
-
-	return nil
 }
 
 func (s *graphMux) Shutdown(ctx context.Context) error {
@@ -489,24 +337,6 @@ func (s *graphMux) Shutdown(ctx context.Context) error {
 		}
 	}
 
-	if s.otelCacheMetrics != nil {
-		if aErr := s.otelCacheMetrics.Shutdown(); aErr != nil {
-			err = errors.Join(err, aErr)
-		}
-	}
-
-	if s.prometheusCacheMetrics != nil {
-		if aErr := s.prometheusCacheMetrics.Shutdown(); aErr != nil {
-			err = errors.Join(err, aErr)
-		}
-	}
-
-	if s.metricStore != nil {
-		if aErr := s.metricStore.Shutdown(ctx); aErr != nil {
-			err = errors.Join(err, aErr)
-		}
-	}
-
 	return err
 }
 
@@ -519,58 +349,9 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 	engineConfig *nodev1.EngineConfiguration,
 	configSubgraphs []*nodev1.Subgraph,
 ) (*graphMux, error) {
-	gm := &graphMux{
-		metricStore: rmetric.NewNoopMetrics(),
-	}
+	gm := &graphMux{}
 
 	httpRouter := chi.NewRouter()
-
-	baseOtelAttributes := append([]attribute.KeyValue{otel.WgRouterConfigVersion.String(routerConfigVersion)}, s.baseOtelAttributes...)
-
-	if featureFlagName != "" {
-		baseOtelAttributes = append(baseOtelAttributes, otel.WgFeatureFlag.String(featureFlagName))
-	}
-
-	metricsEnabled := s.metricConfig.IsEnabled()
-
-	// we only enable the attribute mapper if we are not using the default cloud exporter
-	enableAttributeMapper := !(s.metricConfig.IsUsingCloudExporter || rmetric.IsDefaultCloudExporterConfigured(s.metricConfig.OpenTelemetry.Exporters))
-
-	exprManager := expr.CreateNewExprManager()
-
-	// We might want to remap or exclude known attributes based on the configuration for metrics
-	mapper := newAttributeMapper(enableAttributeMapper, s.metricConfig.Attributes)
-	attExpressions, attErr := newAttributeExpressions(s.metricConfig.Attributes, exprManager)
-	if attErr != nil {
-		return nil, attErr
-	}
-	baseMetricAttributes := mapper.mapAttributes(baseOtelAttributes)
-	var telemetryAttExpressions *attributeExpressions
-	if len(s.telemetryAttributes) > 0 {
-		var telemetryAttErr error
-		telemetryAttExpressions, telemetryAttErr = newAttributeExpressions(s.telemetryAttributes, exprManager)
-		if telemetryAttErr != nil {
-			return nil, telemetryAttErr
-		}
-	}
-
-	// Prometheus metricStore rely on OTLP metricStore
-	if metricsEnabled {
-		m, err := rmetric.NewStore(
-			rmetric.WithPromMeterProvider(s.promMeterProvider),
-			rmetric.WithOtlpMeterProvider(s.otlpMeterProvider),
-			rmetric.WithBaseAttributes(baseMetricAttributes),
-			rmetric.WithLogger(s.logger),
-			rmetric.WithProcessStartTime(s.processStartTime),
-			rmetric.WithCardinalityLimit(rmetric.DefaultCardinalityLimit),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create metric handler: %w", err)
-		}
-
-		gm.metricStore = m
-	}
-
 	subgraphs, err := configureSubgraphOverwrites(
 		engineConfig,
 		configSubgraphs,
@@ -586,10 +367,6 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 		return nil, err
 	}
 
-	if err = gm.configureCacheMetrics(s, baseMetricAttributes); err != nil {
-		return nil, err
-	}
-
 	baseLogFields := []zapcore.Field{
 		zap.String("config_version", routerConfigVersion),
 	}
@@ -597,9 +374,6 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 	if featureFlagName != "" {
 		baseLogFields = append(baseLogFields, zap.String("feature_flag", featureFlagName))
 	}
-
-	// Currently, we only support custom attributes from the context for OTLP metrics
-	b := buildAttributesMap(s.metricConfig.Attributes)
 
 	// Enrich the request context with the subgraph information which is required for custom modules and tracing
 	subgraphResolver := NewSubgraphResolver(subgraphs)
@@ -609,16 +383,10 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 			r = r.WithContext(withSubgraphResolver(r.Context(), subgraphResolver))
 
 			reqContext := buildRequestContext(requestContextOptions{
-				operationContext:              nil,
-				requestLogger:                 requestLogger,
-				metricSetAttributes:           b,
-				metricsEnabled:                metricsEnabled,
-				traceEnabled:                  s.traceConfig.Enabled,
-				mapper:                        mapper,
-				metricAttributeExpressions:    attExpressions,
-				telemetryAttributeExpressions: telemetryAttExpressions,
-				w:                             w,
-				r:                             r,
+				operationContext: nil,
+				requestLogger:    requestLogger,
+				w:                w,
+				r:                r,
 			})
 
 			r = r.WithContext(withRequestContext(r.Context(), reqContext))
@@ -654,96 +422,11 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 	// other downstream internal middlewares such as tracing or authentication
 	httpRouter.Use(s.routerOnRequestHandlers...)
 
-	/**
-	* Initialize base attributes from headers and other sources
-	 */
-
-	var commonAttrRequestMapper func(r *http.Request) []attribute.KeyValue
-
-	if len(s.telemetryAttributes) > 0 {
-		// Common attributes across traces and metrics
-		commonAttrRequestMapper = buildHeaderAttributesMapper(s.telemetryAttributes)
-	}
-
-	var metricAttrRequestMapper func(r *http.Request) []attribute.KeyValue
-
-	// Metric attributes are only used for OTLP metrics and Prometheus metrics
-	if s.metricConfig.IsEnabled() {
-		metricAttrRequestMapper = buildHeaderAttributesMapper(s.metricConfig.Attributes)
-	}
-
 	httpRouter.Use(func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			reqContext := getRequestContext(r.Context())
-
-			reqContext.telemetry.addCommonTraceAttribute(baseOtelAttributes...)
-			reqContext.telemetry.addCommonTraceAttribute(otel.WgRouterConfigVersion.String(routerConfigVersion))
-
-			if commonAttrRequestMapper != nil {
-				reqContext.telemetry.addCommonAttribute(commonAttrRequestMapper(r)...)
-			}
-			if metricAttrRequestMapper != nil {
-				reqContext.telemetry.addMetricAttribute(metricAttrRequestMapper(r)...)
-			}
-
 			h.ServeHTTP(w, r)
 		})
 	})
-
-	if s.traceConfig.Enabled {
-		spanStartOptions := []oteltrace.SpanStartOption{
-			oteltrace.WithAttributes(
-				otel.RouterServerAttribute,
-				otel.WgRouterRootSpan.Bool(true),
-			),
-		}
-
-		if s.traceConfig.WithNewRoot {
-			spanStartOptions = append(spanStartOptions, oteltrace.WithNewRoot())
-		}
-
-		middlewareOptions := []otelhttp.Option{
-			otelhttp.WithSpanOptions(spanStartOptions...),
-			otelhttp.WithFilter(rtrace.CommonRequestFilter),
-			otelhttp.WithFilter(rtrace.PrefixRequestFilter(
-				[]string{s.healthCheckPath, s.readinessCheckPath, s.livenessCheckPath}),
-			),
-			// Disable built-in metricStore through NoopMeterProvider
-			otelhttp.WithMeterProvider(sdkmetric.NewMeterProvider()),
-			otelhttp.WithSpanNameFormatter(SpanNameFormatter),
-			otelhttp.WithTracerProvider(s.tracerProvider),
-		}
-
-		if s.compositePropagator != nil {
-			middlewareOptions = append(middlewareOptions, otelhttp.WithPropagators(s.compositePropagator))
-		}
-
-		traceHandler := rtrace.NewMiddleware(
-			rtrace.WithTracePreHandler(
-				func(r *http.Request, w http.ResponseWriter) {
-					reqContext := getRequestContext(r.Context())
-					traceID := rtrace.GetTraceID(r.Context())
-					requestLogger := reqContext.Logger().With(logging.WithTraceID(traceID))
-
-					reqContext.logger = requestLogger
-
-					span := oteltrace.SpanFromContext(r.Context())
-					span.SetAttributes(reqContext.telemetry.traceAttrs...)
-
-					// Set if the trace is sampled in the expression context
-					isSampled := span.SpanContext().IsSampled()
-					reqContext.expressionContext.Request.Trace.Sampled = isSampled
-
-					// Set the trace ID in the response header
-					if s.traceConfig.ResponseTraceHeader.Enabled {
-						w.Header().Set(s.traceConfig.ResponseTraceHeader.HeaderName, traceID)
-					}
-				}),
-			rtrace.WithOtelHttp(middlewareOptions...),
-		)
-
-		httpRouter.Use(traceHandler.Handler)
-	}
 
 	var subgraphAccessLogger *requestlogger.SubgraphAccessLogger
 	if s.accessLogsConfig != nil && s.accessLogsConfig.Logger != nil {
@@ -797,7 +480,6 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 			SubgraphTransportOptions: s.subgraphTransportOptions,
 			PreHandlers:              s.preOriginHandlers,
 			PostHandlers:             s.postOriginHandlers,
-			MetricStore:              gm.metricStore,
 			RetryOptions: retrytransport.RetryOptions{
 				Enabled:       s.retryOptions.Enabled,
 				MaxRetryCount: s.retryOptions.MaxRetryCount,
@@ -807,9 +489,7 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 					return retrytransport.IsRetryableError(err, resp) && !isMutationRequest(req.Context())
 				},
 			},
-			TracerProvider:   s.tracerProvider,
-			TracePropagators: s.compositePropagator,
-			Logger:           s.logger,
+			Logger: s.logger,
 		},
 	}
 
@@ -860,10 +540,9 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 		EnableNormalizationCacheResponseHeader:      s.engineExecutionConfiguration.Debug.EnableNormalizationCacheResponseHeader,
 		EnableResponseHeaderPropagation:             s.headerRules != nil,
 		EngineStats:                                 s.engineStats,
-		TracerProvider:                              s.tracerProvider,
 		Authorizer:                                  NewCosmoAuthorizer(authorizerOptions),
 		SubgraphErrorPropagation:                    s.subgraphErrorPropagation,
-		EngineLoaderHooks:                           NewEngineRequestHooks(gm.metricStore, subgraphAccessLogger, s.tracerProvider),
+		EngineLoaderHooks:                           NewEngineRequestHooks(subgraphAccessLogger),
 	}
 
 	if s.apolloCompatibilityFlags.SubscriptionMultipartPrintBoundary.Enabled {
@@ -874,26 +553,22 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 	executor.Resolver.SetAsyncErrorWriter(graphqlHandler)
 
 	graphqlPreHandler := NewPreHandler(&PreHandlerOptions{
-		Logger:                      s.logger,
-		Executor:                    executor,
-		OperationProcessor:          operationProcessor,
-		Planner:                     operationPlanner,
-		AccessController:            s.accessController,
-		RouterPublicKey:             s.publicKey,
-		EnableRequestTracing:        s.engineExecutionConfiguration.EnableRequestTracing,
-		DevelopmentMode:             s.developmentMode,
-		TracerProvider:              s.tracerProvider,
-		FlushTelemetryAfterResponse: s.awsLambda,
-		TraceExportVariables:        s.traceConfig.ExportGraphQLVariables.Enabled,
-		ComplexityLimits:            nil,
-		AlwaysIncludeQueryPlan:      s.engineExecutionConfiguration.Debug.AlwaysIncludeQueryPlan,
-		AlwaysSkipLoader:            s.engineExecutionConfiguration.Debug.AlwaysSkipLoader,
-		QueryPlansEnabled:           s.Config.queryPlansEnabled,
-		QueryPlansLoggingEnabled:    s.engineExecutionConfiguration.Debug.PrintQueryPlans,
-		ClientHeader:                s.clientHeader,
-		ComputeOperationSha256:      computeSha256,
-		ApolloCompatibilityFlags:    &s.apolloCompatibilityFlags,
-		DisableVariablesRemapping:   s.engineExecutionConfiguration.DisableVariablesRemapping,
+		Logger:                    s.logger,
+		Executor:                  executor,
+		OperationProcessor:        operationProcessor,
+		Planner:                   operationPlanner,
+		AccessController:          s.accessController,
+		RouterPublicKey:           s.publicKey,
+		DevelopmentMode:           s.developmentMode,
+		ComplexityLimits:          nil,
+		AlwaysIncludeQueryPlan:    s.engineExecutionConfiguration.Debug.AlwaysIncludeQueryPlan,
+		AlwaysSkipLoader:          s.engineExecutionConfiguration.Debug.AlwaysSkipLoader,
+		QueryPlansEnabled:         s.Config.queryPlansEnabled,
+		QueryPlansLoggingEnabled:  s.engineExecutionConfiguration.Debug.PrintQueryPlans,
+		ClientHeader:              s.clientHeader,
+		ComputeOperationSha256:    computeSha256,
+		ApolloCompatibilityFlags:  &s.apolloCompatibilityFlags,
+		DisableVariablesRemapping: s.engineExecutionConfiguration.DisableVariablesRemapping,
 		ExprManager:                 exprManager,
 	})
 
@@ -912,7 +587,6 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 			NetPollConnBufferSize:     s.engineExecutionConfiguration.WebSocketClientConnBufferSize,
 			WebSocketConfiguration:    s.webSocketConfiguration,
 			ClientHeader:              s.clientHeader,
-			Attributes:                baseOtelAttributes,
 			DisableVariablesRemapping: s.engineExecutionConfiguration.DisableVariablesRemapping,
 			ApolloCompatibilityFlags:  s.apolloCompatibilityFlags,
 		})
@@ -1019,27 +693,6 @@ func (s *graphServer) Shutdown(ctx context.Context) error {
 		defer cancel()
 
 		ctx = newCtx
-	}
-
-	if s.runtimeMetrics != nil {
-		if err := s.runtimeMetrics.Shutdown(); err != nil {
-			s.logger.Error("Failed to shutdown runtime metrics", zap.Error(err))
-			finalErr = errors.Join(finalErr, err)
-		}
-	}
-
-	if s.otlpEngineMetrics != nil {
-		if err := s.otlpEngineMetrics.Shutdown(); err != nil {
-			s.logger.Error("Failed to shutdown OTLP engine metrics", zap.Error(err))
-			finalErr = errors.Join(finalErr, err)
-		}
-	}
-
-	if s.prometheusEngineMetrics != nil {
-		if err := s.prometheusEngineMetrics.Shutdown(); err != nil {
-			s.logger.Error("Failed to shutdown Prometheus engine metrics", zap.Error(err))
-			finalErr = errors.Join(finalErr, err)
-		}
 	}
 
 	// Shutdown all graphs muxes to release resources
