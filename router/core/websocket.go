@@ -292,9 +292,8 @@ func (h *WebsocketHandler) handleUpgradeRequest(w http.ResponseWriter, r *http.R
 	}
 
 	planOptions := PlanOptions{
-		TraceOptions:         traceOptions,
-		ExecutionOptions:     executionOptions,
-		TrackSchemaUsageInfo: h.preHandler.trackSchemaUsageInfo,
+		TraceOptions:     traceOptions,
+		ExecutionOptions: executionOptions,
 	}
 
 	handler := NewWebsocketConnectionHandler(h.ctx, WebSocketConnectionHandlerOptions{

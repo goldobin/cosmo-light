@@ -1,8 +1,0 @@
-type Product {
-  upc: Int!
-}
-
-type Account @key(fields: "id") {
-  id: Int!
-  products: [Product]! @inaccessible
-}

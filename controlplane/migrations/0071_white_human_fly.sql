@@ -1,1 +1,0 @@
-ALTER TABLE "organization_billing" DROP COLUMN IF EXISTS "email";

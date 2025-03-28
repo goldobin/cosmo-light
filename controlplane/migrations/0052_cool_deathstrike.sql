@@ -1,1 +1,0 @@
-ALTER TABLE "oidc_providers" ADD COLUMN "alias" text NOT NULL;

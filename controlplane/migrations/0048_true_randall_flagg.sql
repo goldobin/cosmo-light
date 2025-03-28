@@ -1,1 +1,0 @@
-ALTER TABLE "subgraphs" ADD COLUMN "subscription_url" text;

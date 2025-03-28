@@ -93,10 +93,9 @@ func (p *OperationPlanner) preparePlan(ctx *operationContext) (*planWithMetaData
 }
 
 type PlanOptions struct {
-	ClientInfo           *ClientInfo
-	TraceOptions         resolve.TraceOptions
-	ExecutionOptions     resolve.ExecutionOptions
-	TrackSchemaUsageInfo bool
+	ClientInfo       *ClientInfo
+	TraceOptions     resolve.TraceOptions
+	ExecutionOptions resolve.ExecutionOptions
 }
 
 func (p *OperationPlanner) plan(opContext *operationContext, options PlanOptions) (err error) {
@@ -111,14 +110,6 @@ func (p *OperationPlanner) plan(opContext *operationContext, options PlanOptions
 			return err
 		}
 		opContext.preparedPlan = prepared
-		if options.TrackSchemaUsageInfo {
-			opContext.typeFieldUsageInfo = prepared.typeFieldUsageInfo
-			opContext.argumentUsageInfo = prepared.argumentUsageInfo
-			opContext.inputUsageInfo, err = graphqlschemausage.GetInputUsageInfo(prepared.operationDocument, p.executor.RouterSchema, opContext.variables)
-			if err != nil {
-				return err
-			}
-		}
 		return nil
 	}
 
@@ -149,13 +140,6 @@ func (p *OperationPlanner) plan(opContext *operationContext, options PlanOptions
 			return errors.New("unexpected prepared plan type")
 		}
 	}
-	if options.TrackSchemaUsageInfo {
-		opContext.typeFieldUsageInfo = opContext.preparedPlan.typeFieldUsageInfo
-		opContext.argumentUsageInfo = opContext.preparedPlan.argumentUsageInfo
-		opContext.inputUsageInfo, err = graphqlschemausage.GetInputUsageInfo(opContext.preparedPlan.operationDocument, p.executor.RouterSchema, opContext.variables)
-		if err != nil {
-			return err
-		}
-	}
+
 	return nil
 }

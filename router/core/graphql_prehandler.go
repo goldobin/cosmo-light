@@ -60,7 +60,6 @@ type PreHandler struct {
 	queryPlansLoggingEnabled  bool // queryPlansLoggingEnabled is a flag to enable logging of query plans
 	routerPublicKey           *ecdsa.PublicKey
 	complexityLimits          *config.ComplexityLimits
-	trackSchemaUsageInfo      bool
 	clientHeader              config.ClientHeader
 	computeOperationSha256    bool
 	apolloCompatibilityFlags  *config.ApolloCompatibilityFlags
@@ -522,10 +521,9 @@ func (h *PreHandler) handleOperation(req *http.Request, variablesParser *astjson
 	}
 	startPlanning := time.Now()
 	planOptions := PlanOptions{
-		ClientInfo:           requestContext.operation.clientInfo,
-		TraceOptions:         requestContext.operation.traceOptions,
-		ExecutionOptions:     requestContext.operation.executionOptions,
-		TrackSchemaUsageInfo: h.trackSchemaUsageInfo,
+		ClientInfo:       requestContext.operation.clientInfo,
+		TraceOptions:     requestContext.operation.traceOptions,
+		ExecutionOptions: requestContext.operation.executionOptions,
 	}
 
 	err = h.planner.plan(requestContext.operation, planOptions)

@@ -1,6 +1,0 @@
-{
-  "themes": [{
-    "name" : "cosmo",
-    "types": [ "login", "email" ]
-  }]
-}

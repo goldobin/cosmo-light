@@ -16,7 +16,6 @@ import (
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/httpclient"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
 
-	graphqlmetrics "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/graphqlmetrics/v1"
 	"github.com/wundergraph/cosmo/router/internal/expr"
 	"github.com/wundergraph/cosmo/router/pkg/authentication"
 )
@@ -420,10 +419,6 @@ type operationContext struct {
 
 	persistedOperationCacheHit bool
 	normalizationCacheHit      bool
-
-	typeFieldUsageInfo []*graphqlmetrics.TypeFieldUsageInfo
-	argumentUsageInfo  []*graphqlmetrics.ArgumentUsageInfo
-	inputUsageInfo     []*graphqlmetrics.InputUsageInfo
 
 	parsingTime       time.Duration
 	validationTime    time.Duration
