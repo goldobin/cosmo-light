@@ -15,7 +15,6 @@ import (
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/nats-io/nuid"
-	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -242,9 +241,6 @@ func NewRouter(opts ...Option) (*Router, error) {
 	}
 
 	r.preOriginHandlers = append(r.preOriginHandlers, func(req *http.Request, ctx RequestContext) (*http.Request, *http.Response) {
-		req.Header.Add("X-A10n-Issuer", "Test Issuer 01")
-		req.Header.Add("X-A10n-Client-Id", "Test Client ID 01")
-		req.Header.Add("X-A10n-Scope", "https://graph.cpms.newmotion.com/station-status-read https://graph.cpms.newmotion.com/remote-transaction-write https://graph.cpms.newmotion.com/station-configuration-read https://graph.cpms.newmotion.com/station-transactions-read https://graph.cpms.newmotion.com/get-diagnostics-write https://graph.cpms.newmotion.com/get-configuration-write https://graph.cpms.newmotion.com/station-read https://graph.cpms.newmotion.com/firmware-update-task-write https://graph.cpms.newmotion.com/station-interactions-read https://graph.cpms.newmotion.com/data-transfer-write https://graph.cpms.newmotion.com/station-auth-key-rotation-write https://graph.cpms.newmotion.com/command-delivery-read https://graph.cpms.newmotion.com/unlock-connector-write https://graph.cpms.newmotion.com/station-block-write https://graph.cpms.newmotion.com/station-issues-read https://graph.cpms.newmotion.com/firmware-update-task-read https://graph.cpms.newmotion.com/change-configuration-write https://graph.cpms.newmotion.com/subnet-read https://graph.cpms.newmotion.com/change-station-availability-write https://graph.cpms.newmotion.com/station-auth-key-write https://graph.cpms.newmotion.com/subnet-group-read https://graph.cpms.newmotion.com/station-block-read https://graph.cpms.newmotion.com/station-reset-write https://graph.cpms.newmotion.com/station-auth-key-rotation-read")
 		return req, nil
 	})
 
@@ -1046,56 +1042,6 @@ func newHTTPTransport(opts *TransportRequestOptions) *http.Transport {
 		ResponseHeaderTimeout: opts.ResponseHeaderTimeout,
 		ExpectContinueTimeout: opts.ExpectContinueTimeout,
 	}
-}
-
-// buildAttributesMap returns a map of custom attributes to quickly check if a field is used in the custom attributes.
-func buildAttributesMap(attributes []config.CustomAttribute) map[string]string {
-	result := make(map[string]string)
-	for _, attr := range attributes {
-		if attr.ValueFrom != nil && attr.ValueFrom.ContextField != "" {
-			result[attr.ValueFrom.ContextField] = attr.Key
-		}
-	}
-	return result
-}
-
-// buildHeaderAttributesMapper returns a function that maps custom attributes to the request headers.
-func buildHeaderAttributesMapper(attributes []config.CustomAttribute) func(req *http.Request) []attribute.KeyValue {
-	if len(attributes) == 0 {
-		return nil
-	}
-
-	return func(req *http.Request) []attribute.KeyValue {
-		var result []attribute.KeyValue
-
-		for _, attr := range attributes {
-			if attr.ValueFrom != nil {
-				if req != nil && attr.ValueFrom.RequestHeader != "" {
-					hv := req.Header.Get(attr.ValueFrom.RequestHeader)
-					if hv != "" {
-						result = append(result, attribute.String(attr.Key, hv))
-					} else if attr.Default != "" {
-						result = append(result, attribute.String(attr.Key, attr.Default))
-					}
-				} else if attr.Default != "" {
-					result = append(result, attribute.String(attr.Key, attr.Default))
-				}
-			} else if attr.Default != "" {
-				result = append(result, attribute.String(attr.Key, attr.Default))
-			}
-		}
-
-		return result
-	}
-}
-
-func buildResourceAttributes(attributes []config.CustomStaticAttribute) []attribute.KeyValue {
-	var result []attribute.KeyValue
-	for _, attr := range attributes {
-		result = append(result, attribute.String(attr.Key, attr.Value))
-	}
-	r := attribute.NewSet(result...)
-	return r.ToSlice()
 }
 
 func or[T any](maybe *T, or T) T {

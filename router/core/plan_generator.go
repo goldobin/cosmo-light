@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
 	"net/http"
 	"os"
 
@@ -134,15 +135,6 @@ func NewPlanGenerator(configFilePath string, logger *zap.Logger, maxDataSourceCo
 	return pg, nil
 }
 
-func NewPlanGeneratorFromConfig(config *nodev1.RouterConfig, logger *zap.Logger, maxDataSourceCollectorsConcurrency uint) (*PlanGenerator, error) {
-	pg := &PlanGenerator{}
-	if err := pg.loadConfiguration(config, logger, maxDataSourceCollectorsConcurrency); err != nil {
-		return nil, err
-	}
-
-	return pg, nil
-}
-
 func (pg *PlanGenerator) GetPlanner() (*Planner, error) {
 	return NewPlanner(pg.planConfiguration, pg.definition)
 }
@@ -156,6 +148,7 @@ func (pg *PlanGenerator) buildRouterConfig(configFilePath string) (*nodev1.Route
 	return routerConfig, nil
 }
 
+func (pg *PlanGenerator) loadConfiguration(routerConfig *nodev1.RouterConfig, logger *zap.Logger, maxDataSourceCollectorsConcurrency uint) error {
 	var netPollConfig graphql_datasource.NetPollConfiguration
 	netPollConfig.ApplyDefaults()
 

@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/klauspost/compress/gzhttp"
 	"github.com/klauspost/compress/gzip"
+	"github.com/wundergraph/cosmo/router/internal/expr"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -242,7 +243,7 @@ type graphMux struct {
 
 // buildOperationCaches creates the caches for the graph mux.
 // The caches are created based on the engine configuration.
-func (s *graphMux) buildOperationCaches(srv *graphServer) (computeSha256 bool, err error) {
+func (s *graphMux) buildOperationCaches(srv *graphServer) (err error) {
 	// We create a new execution plan cache for each operation planner which is coupled to
 	// the specific engine configuration. This is necessary because otherwise we would return invalid plans.
 	//
@@ -263,7 +264,7 @@ func (s *graphMux) buildOperationCaches(srv *graphServer) (computeSha256 bool, e
 		}
 		s.planCache, err = ristretto.NewCache[uint64, *planWithMetaData](planCacheConfig)
 		if err != nil {
-			return computeSha256, fmt.Errorf("failed to create planner cache: %w", err)
+			return fmt.Errorf("failed to create planner cache: %w", err)
 		}
 	}
 
@@ -277,7 +278,7 @@ func (s *graphMux) buildOperationCaches(srv *graphServer) (computeSha256 bool, e
 		}
 		s.normalizationCache, err = ristretto.NewCache[uint64, NormalizationCacheEntry](normalizationCacheConfig)
 		if err != nil {
-			return computeSha256, fmt.Errorf("failed to create normalization cache: %w", err)
+			return fmt.Errorf("failed to create normalization cache: %w", err)
 		}
 	}
 
@@ -291,28 +292,14 @@ func (s *graphMux) buildOperationCaches(srv *graphServer) (computeSha256 bool, e
 		}
 		s.validationCache, err = ristretto.NewCache[uint64, bool](validationCacheConfig)
 		if err != nil {
-			return computeSha256, fmt.Errorf("failed to create validation cache: %w", err)
+			return fmt.Errorf("failed to create validation cache: %w", err)
 		}
 	}
 
-	if computeSha256 {
-		operationHashCacheConfig := &ristretto.Config[uint64, string]{
-			Metrics:            false,
-			MaxCost:            srv.engineExecutionConfiguration.OperationHashCacheSize,
-			NumCounters:        srv.engineExecutionConfiguration.OperationHashCacheSize * 10,
-			IgnoreInternalCost: true,
-			BufferItems:        64,
-		}
-		s.operationHashCache, err = ristretto.NewCache[uint64, string](operationHashCacheConfig)
-		if err != nil {
-			return computeSha256, fmt.Errorf("failed to create operation hash cache: %w", err)
-		}
-	}
-
-	return computeSha256, nil
+	return nil
 }
 
-func (s *graphMux) Shutdown(ctx context.Context) error {
+func (s *graphMux) Shutdown() error {
 	var err error
 
 	if s.planCache != nil {
@@ -350,8 +337,8 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 	configSubgraphs []*nodev1.Subgraph,
 ) (*graphMux, error) {
 	gm := &graphMux{}
-
 	httpRouter := chi.NewRouter()
+	exprManager := expr.CreateNewExprManager()
 	subgraphs, err := configureSubgraphOverwrites(
 		engineConfig,
 		configSubgraphs,
@@ -362,8 +349,7 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 		return nil, err
 	}
 
-	computeSha256, err := gm.buildOperationCaches(s)
-	if err != nil {
+	if err := gm.buildOperationCaches(s); err != nil {
 		return nil, err
 	}
 
@@ -566,10 +552,9 @@ func (s *graphServer) buildGraphMux(ctx context.Context,
 		QueryPlansEnabled:         s.Config.queryPlansEnabled,
 		QueryPlansLoggingEnabled:  s.engineExecutionConfiguration.Debug.PrintQueryPlans,
 		ClientHeader:              s.clientHeader,
-		ComputeOperationSha256:    computeSha256,
 		ApolloCompatibilityFlags:  &s.apolloCompatibilityFlags,
 		DisableVariablesRemapping: s.engineExecutionConfiguration.DisableVariablesRemapping,
-		ExprManager:                 exprManager,
+		ExprManager:               exprManager,
 	})
 
 	if s.webSocketConfiguration != nil && s.webSocketConfiguration.Enabled {
@@ -700,7 +685,7 @@ func (s *graphServer) Shutdown(ctx context.Context) error {
 	s.graphMuxListLock.Lock()
 	defer s.graphMuxListLock.Unlock()
 	for _, mux := range s.graphMuxList {
-		if err := mux.Shutdown(ctx); err != nil {
+		if err := mux.Shutdown(); err != nil {
 			s.logger.Error("Failed to shutdown graph mux", zap.Error(err))
 			finalErr = errors.Join(finalErr, err)
 		}

@@ -41,10 +41,9 @@ type PreHandlerOptions struct {
 	QueryPlansEnabled         bool
 	QueryPlansLoggingEnabled  bool
 	ClientHeader              config.ClientHeader
-	ComputeOperationSha256    bool
 	ApolloCompatibilityFlags  *config.ApolloCompatibilityFlags
 	DisableVariablesRemapping bool
-	ExprManager                 *expr.Manager
+	ExprManager               *expr.Manager
 }
 
 type PreHandler struct {
@@ -61,11 +60,10 @@ type PreHandler struct {
 	routerPublicKey           *ecdsa.PublicKey
 	complexityLimits          *config.ComplexityLimits
 	clientHeader              config.ClientHeader
-	computeOperationSha256    bool
 	apolloCompatibilityFlags  *config.ApolloCompatibilityFlags
 	variableParsePool         astjson.ParserPool
 	disableVariablesRemapping bool
-	exprManager                 *expr.Manager
+	exprManager               *expr.Manager
 }
 
 type httpOperation struct {
@@ -91,7 +89,6 @@ func NewPreHandler(opts *PreHandlerOptions) *PreHandler {
 		queryPlansEnabled:         opts.QueryPlansEnabled,
 		queryPlansLoggingEnabled:  opts.QueryPlansLoggingEnabled,
 		clientHeader:              opts.ClientHeader,
-		computeOperationSha256:    opts.ComputeOperationSha256,
 		apolloCompatibilityFlags:  opts.ApolloCompatibilityFlags,
 		disableVariablesRemapping: opts.DisableVariablesRemapping,
 		exprManager:               opts.ExprManager,
@@ -238,10 +235,6 @@ func (h *PreHandler) Handler(next http.Handler) http.Handler {
 	})
 }
 
-func (h *PreHandler) shouldComputeOperationSha256() bool {
-	return h.computeOperationSha256
-}
-
 func (h *PreHandler) handleOperation(req *http.Request, variablesParser *astjson.Parser, httpOperation *httpOperation) error {
 	operationKit, err := h.operationProcessor.NewKit()
 	if err != nil {
@@ -279,17 +272,6 @@ func (h *PreHandler) handleOperation(req *http.Request, variablesParser *astjson
 		if len(httpOperation.files) > 0 {
 			requestContext.operation.files = httpOperation.files
 		}
-	}
-
-	// Compute the operation sha256 hash as soon as possible for observability reasons
-	if h.shouldComputeOperationSha256() {
-		if err := operationKit.ComputeOperationSha256(); err != nil {
-			return &httpGraphqlError{
-				message:    fmt.Sprintf("error hashing operation: %s", err),
-				statusCode: http.StatusInternalServerError,
-			}
-		}
-		requestContext.operation.sha256Hash = operationKit.parsedOperation.Sha256Hash
 	}
 
 	requestContext.operation.extensions = operationKit.parsedOperation.Request.Extensions
