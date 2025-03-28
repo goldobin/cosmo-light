@@ -166,9 +166,7 @@ func NewRouter(ctx context.Context, params Params, additionalOptions ...core.Opt
 	}
 
 	options = append(options, core.WithExecutionConfig(&core.ExecutionConfig{
-		Watch:         cfg.ExecutionConfig.File.Watch,
-		WatchInterval: cfg.ExecutionConfig.File.WatchInterval,
-		Path:          executionConfigPath,
+		Path: executionConfigPath,
 	}))
 
 	if len(authenticators) > 0 {
