@@ -11,23 +11,17 @@ import (
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/plan"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/postprocess"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
-
-	graphqlmetricsv1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/graphqlmetrics/v1"
-	"github.com/wundergraph/cosmo/router/pkg/graphqlschemausage"
 )
 
 type planWithMetaData struct {
 	preparedPlan                      plan.Plan
 	operationDocument, schemaDocument *ast.Document
-	typeFieldUsageInfo                []*graphqlmetricsv1.TypeFieldUsageInfo
-	argumentUsageInfo                 []*graphqlmetricsv1.ArgumentUsageInfo
 }
 
 type OperationPlanner struct {
-	sf             singleflight.Group
-	planCache      ExecutionPlanCache[uint64, *planWithMetaData]
-	executor       *Executor
-	trackUsageInfo bool
+	sf        singleflight.Group
+	planCache ExecutionPlanCache[uint64, *planWithMetaData]
+	executor  *Executor
 }
 
 type ExecutionPlanCache[K any, V any] interface {
@@ -41,9 +35,8 @@ type ExecutionPlanCache[K any, V any] interface {
 
 func NewOperationPlanner(executor *Executor, planCache ExecutionPlanCache[uint64, *planWithMetaData]) *OperationPlanner {
 	return &OperationPlanner{
-		planCache:      planCache,
-		executor:       executor,
-		trackUsageInfo: executor.TrackUsageInfo,
+		planCache: planCache,
+		executor:  executor,
 	}
 }
 
@@ -79,14 +72,6 @@ func (p *OperationPlanner) preparePlan(ctx *operationContext) (*planWithMetaData
 		preparedPlan:      preparedPlan,
 		operationDocument: &doc,
 		schemaDocument:    p.executor.RouterSchema,
-	}
-
-	if p.trackUsageInfo {
-		out.typeFieldUsageInfo = graphqlschemausage.GetTypeFieldUsageInfo(preparedPlan)
-		out.argumentUsageInfo, err = graphqlschemausage.GetArgumentUsageInfo(&doc, p.executor.RouterSchema)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	return out, nil

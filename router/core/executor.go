@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"github.com/wundergraph/cosmo/router/internal/rconf"
 	"net/http"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/operationreport"
 
-	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
 	"github.com/wundergraph/cosmo/router/pkg/config"
 )
 
@@ -38,12 +38,11 @@ type Executor struct {
 	RouterSchema    *ast.Document
 	Resolver        *resolve.Resolver
 	RenameTypeNames []resolve.RenameTypeName
-	TrackUsageInfo  bool
 }
 
 type ExecutorBuildOptions struct {
-	EngineConfig                   *nodev1.EngineConfiguration
-	Subgraphs                      []*nodev1.Subgraph
+	EngineConfig                   *rconf.EngineConfiguration
+	Subgraphs                      []*rconf.Subgraph
 	RouterEngineConfig             *RouterEngineConfiguration
 	Reporter                       resolve.Reporter
 	ApolloCompatibilityFlags       config.ApolloCompatibilityFlags
@@ -129,7 +128,7 @@ func (b *ExecutorConfigurationBuilder) Build(ctx context.Context, opts *Executor
 		return nil, fmt.Errorf("failed to merge graphql schema with base schema: %w", err)
 	}
 
-	if clientSchemaStr := opts.EngineConfig.GetGraphqlClientSchema(); clientSchemaStr != "" {
+	if clientSchemaStr := opts.EngineConfig.GraphqlClientSchema; clientSchemaStr != "" {
 		// The client schema is a subset of the router schema that does not include @inaccessible fields.
 		// The client schema only exists if the federated schema includes @inaccessible directives or @tag directives
 
@@ -188,7 +187,7 @@ func (b *ExecutorConfigurationBuilder) Build(ctx context.Context, opts *Executor
 	}, nil
 }
 
-func (b *ExecutorConfigurationBuilder) buildPlannerConfiguration(ctx context.Context, engineConfig *nodev1.EngineConfiguration, subgraphs []*nodev1.Subgraph, routerEngineCfg *RouterEngineConfiguration) (*plan.Configuration, error) {
+func (b *ExecutorConfigurationBuilder) buildPlannerConfiguration(ctx context.Context, engineConfig *rconf.EngineConfiguration, subgraphs []*rconf.Subgraph, routerEngineCfg *RouterEngineConfiguration) (*plan.Configuration, error) {
 	// this loader is used to take the engine config and create a plan config
 	// the plan config is what the engine uses to turn a GraphQL Request into an execution plan
 	// the plan config is stateful as it carries connection pools and other things

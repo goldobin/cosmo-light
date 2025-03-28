@@ -94,7 +94,7 @@ func createYaml(orgPath string, cfgPath string) {
 	}
 
 	// read config.json file into Configuration struct
-	var config nodev1.RouterConfig
+	var config rconf.RouterConfig
 
 	cfgContent, err := os.ReadFile(cfgPath)
 	if err != nil {

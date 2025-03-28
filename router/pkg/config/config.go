@@ -358,21 +358,6 @@ func (c *ComplexityLimit) ApplyLimit() bool {
 	return c.Enabled
 }
 
-type OverrideRoutingURLConfiguration struct {
-	Subgraphs map[string]string `yaml:"subgraphs"`
-}
-
-type SubgraphOverridesConfiguration struct {
-	RoutingURL                       string `yaml:"routing_url"`
-	SubscriptionURL                  string `yaml:"subscription_url"`
-	SubscriptionProtocol             string `yaml:"subscription_protocol"`
-	SubscriptionWebsocketSubprotocol string `yaml:"subscription_websocket_subprotocol"`
-}
-
-type OverridesConfiguration struct {
-	Subgraphs map[string]SubgraphOverridesConfiguration `yaml:"subgraphs"`
-}
-
 type JWKSConfiguration struct {
 	URL             string        `yaml:"url"`
 	Algorithms      []string      `yaml:"algorithms"`
@@ -715,11 +700,8 @@ type Config struct {
 	Authentication                 AuthenticationConfiguration           `yaml:"authentication,omitempty"`
 	Authorization                  AuthorizationConfiguration            `yaml:"authorization,omitempty"`
 	RateLimit                      RateLimitConfiguration                `yaml:"rate_limit,omitempty"`
-	LocalhostFallbackInsideDocker  bool                                  `yaml:"localhost_fallback_inside_docker" envDefault:"true" env:"LOCALHOST_FALLBACK_INSIDE_DOCKER"`
 	DevelopmentMode                bool                                  `yaml:"dev_mode" envDefault:"false" env:"DEV_MODE"`
 	RouterConfigPath               string                                `yaml:"router_config_path,omitempty" env:"ROUTER_CONFIG_PATH"`
-	OverrideRoutingURL             OverrideRoutingURLConfiguration       `yaml:"override_routing_url"`
-	Overrides                      OverridesConfiguration                `yaml:"overrides"`
 	EngineExecutionConfiguration   EngineExecutionConfiguration          `yaml:"engine"`
 	WebSocket                      WebSocketConfiguration                `yaml:"websocket,omitempty"`
 	SubgraphErrorPropagation       SubgraphErrorPropagationConfiguration `yaml:"subgraph_error_propagation"`

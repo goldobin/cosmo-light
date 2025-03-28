@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/wundergraph/cosmo/router/internal/rconf"
 	"net/http"
 	"net/url"
 	"slices"
@@ -20,9 +21,6 @@ import (
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/graphql_datasource"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/staticdatasource"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/plan"
-
-	"github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/common"
-	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
 )
 
 type Loader struct {
@@ -139,8 +137,8 @@ func NewLoader(resolver FactoryResolver) *Loader {
 	}
 }
 
-func (l *Loader) LoadInternedString(engineConfig *nodev1.EngineConfiguration, str *nodev1.InternedString) (string, error) {
-	key := str.GetKey()
+func (l *Loader) LoadInternedString(engineConfig *rconf.EngineConfiguration, str *rconf.InternedString) (string, error) {
+	key := str.Key
 	s, ok := engineConfig.StringStorage[key]
 	if !ok {
 		return "", fmt.Errorf("no string found for key %q", key)
@@ -154,7 +152,7 @@ type RouterEngineConfiguration struct {
 	SubgraphErrorPropagation config.SubgraphErrorPropagationConfiguration
 }
 
-func mapProtoFilterToPlanFilter(input *nodev1.SubscriptionFilterCondition, output *plan.SubscriptionFilterCondition) *plan.SubscriptionFilterCondition {
+func mapProtoFilterToPlanFilter(input *rconf.SubscriptionFilterCondition, output *plan.SubscriptionFilterCondition) *plan.SubscriptionFilterCondition {
 	if input == nil {
 		return nil
 	}
@@ -207,10 +205,17 @@ func mapProtoFilterToPlanFilter(input *nodev1.SubscriptionFilterCondition, outpu
 	return nil
 }
 
-func (l *Loader) Load(engineConfig *nodev1.EngineConfiguration, subgraphs []*nodev1.Subgraph, routerEngineConfig *RouterEngineConfiguration) (*plan.Configuration, error) {
+func (l *Loader) Load(engineConfig *rconf.EngineConfiguration, subgraphs []*rconf.Subgraph, routerEngineConfig *RouterEngineConfiguration) (*plan.Configuration, error) {
 	var outConfig plan.Configuration
+
 	// attach field usage information to the plan
-	outConfig.DefaultFlushIntervalMillis = engineConfig.DefaultFlushInterval
+
+	defaultFlushInterval, err := engineConfig.DefaultFlushInterval.Int64()
+	if err != nil {
+		return nil, fmt.Errorf("error parsing default flush interval: %v", err)
+	}
+
+	outConfig.DefaultFlushIntervalMillis = defaultFlushInterval
 	for _, configuration := range engineConfig.FieldConfigurations {
 		var args []plan.ArgumentConfiguration
 		for _, argumentConfiguration := range configuration.ArgumentsConfiguration {
@@ -218,9 +223,9 @@ func (l *Loader) Load(engineConfig *nodev1.EngineConfiguration, subgraphs []*nod
 				Name: argumentConfiguration.Name,
 			}
 			switch argumentConfiguration.SourceType {
-			case nodev1.ArgumentSource_FIELD_ARGUMENT:
+			case rconf.ArgumentSource_FIELD_ARGUMENT:
 				arg.SourceType = plan.FieldArgumentSource
-			case nodev1.ArgumentSource_OBJECT_FIELD:
+			case rconf.ArgumentSource_OBJECT_FIELD:
 				arg.SourceType = plan.ObjectFieldSource
 			}
 			args = append(args, arg)
@@ -246,7 +251,7 @@ func (l *Loader) Load(engineConfig *nodev1.EngineConfiguration, subgraphs []*nod
 		var out plan.DataSource
 
 		switch in.Kind {
-		case nodev1.DataSourceKind_STATIC:
+		case rconf.DataSourceKind_STATIC:
 			factory, err := l.resolver.ResolveStaticFactory()
 			if err != nil {
 				return nil, err
@@ -264,7 +269,7 @@ func (l *Loader) Load(engineConfig *nodev1.EngineConfiguration, subgraphs []*nod
 				return nil, fmt.Errorf("error creating data source configuration for data source %s: %w", in.Id, err)
 			}
 
-		case nodev1.DataSourceKind_GRAPHQL:
+		case rconf.DataSourceKind_GRAPHQL:
 			header := http.Header{}
 			for s, httpHeader := range in.CustomGraphql.Fetch.Header {
 				for _, value := range httpHeader.Values {
@@ -272,7 +277,7 @@ func (l *Loader) Load(engineConfig *nodev1.EngineConfiguration, subgraphs []*nod
 				}
 			}
 
-			fetchUrl := config.LoadStringVariable(in.CustomGraphql.Fetch.GetUrl())
+			fetchUrl := config.LoadStringVariable(in.CustomGraphql.Fetch.Url)
 
 			subscriptionUrl := config.LoadStringVariable(in.CustomGraphql.Subscription.Url)
 			if subscriptionUrl == "" {
@@ -287,7 +292,7 @@ func (l *Loader) Load(engineConfig *nodev1.EngineConfiguration, subgraphs []*nod
 				}
 			}
 
-			graphqlSchema, err := l.LoadInternedString(engineConfig, in.CustomGraphql.GetUpstreamSchema())
+			graphqlSchema, err := l.LoadInternedString(engineConfig, in.CustomGraphql.UpstreamSchema)
 			if err != nil {
 				return nil, fmt.Errorf("could not load GraphQL schema for data source %s: %w", in.Id, err)
 			}
@@ -296,13 +301,13 @@ func (l *Loader) Load(engineConfig *nodev1.EngineConfiguration, subgraphs []*nod
 			var subscriptionSSEMethodPost bool
 			if in.CustomGraphql.Subscription.Protocol != nil {
 				switch *in.CustomGraphql.Subscription.Protocol {
-				case common.GraphQLSubscriptionProtocol_GRAPHQL_SUBSCRIPTION_PROTOCOL_WS:
+				case rconf.GraphQLSubscriptionProtocol_GRAPHQL_SUBSCRIPTION_PROTOCOL_WS:
 					subscriptionUseSSE = false
 					subscriptionSSEMethodPost = false
-				case common.GraphQLSubscriptionProtocol_GRAPHQL_SUBSCRIPTION_PROTOCOL_SSE:
+				case rconf.GraphQLSubscriptionProtocol_GRAPHQL_SUBSCRIPTION_PROTOCOL_SSE:
 					subscriptionUseSSE = true
 					subscriptionSSEMethodPost = false
-				case common.GraphQLSubscriptionProtocol_GRAPHQL_SUBSCRIPTION_PROTOCOL_SSE_POST:
+				case rconf.GraphQLSubscriptionProtocol_GRAPHQL_SUBSCRIPTION_PROTOCOL_SSE_POST:
 					subscriptionUseSSE = true
 					subscriptionSSEMethodPost = true
 				}
@@ -316,11 +321,11 @@ func (l *Loader) Load(engineConfig *nodev1.EngineConfiguration, subgraphs []*nod
 			wsSubprotocol := "auto"
 			if in.CustomGraphql.Subscription.WebsocketSubprotocol != nil {
 				switch *in.CustomGraphql.Subscription.WebsocketSubprotocol {
-				case common.GraphQLWebsocketSubprotocol_GRAPHQL_WEBSOCKET_SUBPROTOCOL_WS:
+				case rconf.GraphQLWebsocketSubprotocol_GRAPHQL_WEBSOCKET_SUBPROTOCOL_WS:
 					wsSubprotocol = "graphql-ws"
-				case common.GraphQLWebsocketSubprotocol_GRAPHQL_WEBSOCKET_SUBPROTOCOL_TRANSPORT_WS:
+				case rconf.GraphQLWebsocketSubprotocol_GRAPHQL_WEBSOCKET_SUBPROTOCOL_TRANSPORT_WS:
 					wsSubprotocol = "graphql-transport-ws"
-				case common.GraphQLWebsocketSubprotocol_GRAPHQL_WEBSOCKET_SUBPROTOCOL_AUTO:
+				case rconf.GraphQLWebsocketSubprotocol_GRAPHQL_WEBSOCKET_SUBPROTOCOL_AUTO:
 					wsSubprotocol = "auto"
 				}
 			}
@@ -345,7 +350,7 @@ func (l *Loader) Load(engineConfig *nodev1.EngineConfiguration, subgraphs []*nod
 			customConfiguration, err := graphql_datasource.NewConfiguration(graphql_datasource.ConfigurationInput{
 				Fetch: &graphql_datasource.FetchConfiguration{
 					URL:    fetchUrl,
-					Method: in.CustomGraphql.Fetch.Method.String(),
+					Method: string(in.CustomGraphql.Fetch.Method),
 					Header: header,
 				},
 				Subscription: &graphql_datasource.SubscriptionConfiguration{
@@ -390,8 +395,8 @@ func (l *Loader) Load(engineConfig *nodev1.EngineConfiguration, subgraphs []*nod
 	return &outConfig, nil
 }
 
-func (l *Loader) subgraphName(subgraphs []*nodev1.Subgraph, dataSourceID string) string {
-	i := slices.IndexFunc(subgraphs, func(s *nodev1.Subgraph) bool {
+func (l *Loader) subgraphName(subgraphs []*rconf.Subgraph, dataSourceID string) string {
+	i := slices.IndexFunc(subgraphs, func(s *rconf.Subgraph) bool {
 		return s.Id == dataSourceID
 	})
 
@@ -402,7 +407,7 @@ func (l *Loader) subgraphName(subgraphs []*nodev1.Subgraph, dataSourceID string)
 	return ""
 }
 
-func (l *Loader) dataSourceMetaData(in *nodev1.DataSourceConfiguration) *plan.DataSourceMetadata {
+func (l *Loader) dataSourceMetaData(in *rconf.DataSourceConfiguration) *plan.DataSourceMetadata {
 	var d plan.DirectiveConfigurations = make([]plan.DirectiveConfiguration, 0, len(in.Directives))
 
 	out := &plan.DataSourceMetadata{
@@ -496,7 +501,7 @@ func (l *Loader) dataSourceMetaData(in *nodev1.DataSourceConfiguration) *plan.Da
 	return out
 }
 
-func (l *Loader) fieldHasAuthorizationRule(fieldConfiguration *nodev1.FieldConfiguration) bool {
+func (l *Loader) fieldHasAuthorizationRule(fieldConfiguration *rconf.FieldConfiguration) bool {
 	if fieldConfiguration == nil {
 		return false
 	}

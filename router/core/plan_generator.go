@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
+	"github.com/wundergraph/cosmo/router/internal/rconf"
 	"net/http"
 	"os"
 
@@ -139,7 +139,7 @@ func (pg *PlanGenerator) GetPlanner() (*Planner, error) {
 	return NewPlanner(pg.planConfiguration, pg.definition)
 }
 
-func (pg *PlanGenerator) buildRouterConfig(configFilePath string) (*nodev1.RouterConfig, error) {
+func (pg *PlanGenerator) buildRouterConfig(configFilePath string) (*rconf.RouterConfig, error) {
 	routerConfig, err := execution_config.FromFile(configFilePath)
 	if err != nil {
 		return nil, err
@@ -148,7 +148,7 @@ func (pg *PlanGenerator) buildRouterConfig(configFilePath string) (*nodev1.Route
 	return routerConfig, nil
 }
 
-func (pg *PlanGenerator) loadConfiguration(routerConfig *nodev1.RouterConfig, logger *zap.Logger, maxDataSourceCollectorsConcurrency uint) error {
+func (pg *PlanGenerator) loadConfiguration(routerConfig *rconf.RouterConfig, logger *zap.Logger, maxDataSourceCollectorsConcurrency uint) error {
 	var netPollConfig graphql_datasource.NetPollConfiguration
 	netPollConfig.ApplyDefaults()
 
@@ -169,7 +169,7 @@ func (pg *PlanGenerator) loadConfiguration(routerConfig *nodev1.RouterConfig, lo
 	})
 
 	// this generates the plan configuration using the data source factories from the config package
-	planConfig, err := loader.Load(routerConfig.GetEngineConfig(), routerConfig.GetSubgraphs(), &RouterEngineConfiguration{})
+	planConfig, err := loader.Load(routerConfig.EngineConfig, routerConfig.Subgraphs, &RouterEngineConfiguration{})
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}

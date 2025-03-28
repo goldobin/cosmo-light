@@ -59,8 +59,6 @@ func NewRouter(ctx context.Context, params Params, additionalOptions ...core.Opt
 
 	options := []core.Option{
 		core.WithListenerAddr(cfg.ListenAddr),
-		core.WithOverrideRoutingURL(cfg.OverrideRoutingURL),
-		core.WithOverrides(cfg.Overrides),
 		core.WithLogger(logger),
 		core.WithIntrospection(cfg.IntrospectionEnabled),
 		core.WithQueryPlans(cfg.QueryPlansEnabled),

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"github.com/wundergraph/cosmo/router/internal/rconf"
 	"io"
 	"net/http"
 	"regexp"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	cachedirective "github.com/pquerna/cachecontrol/cacheobject"
-	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
 	"github.com/wundergraph/cosmo/router/pkg/config"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
 )
@@ -604,7 +604,7 @@ func SubgraphRules(rules *config.HeaderRules, subgraphName string) []*config.Req
 }
 
 // FetchURLRules returns the list of header rules for first subgraph that matches the given URL
-func FetchURLRules(rules *config.HeaderRules, subgraphs []*nodev1.Subgraph, routingURL string) []*config.RequestHeaderRule {
+func FetchURLRules(rules *config.HeaderRules, subgraphs []*rconf.Subgraph, routingURL string) []*config.RequestHeaderRule {
 	var subgraphName string
 	for _, subgraph := range subgraphs {
 		if subgraph.RoutingUrl == routingURL {

@@ -12,32 +12,23 @@ import (
 	"github.com/klauspost/compress/gzhttp"
 	"github.com/klauspost/compress/gzip"
 	"github.com/wundergraph/cosmo/router/internal/expr"
+	"github.com/wundergraph/cosmo/router/internal/rconf"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"golang.org/x/exp/maps"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/common"
-	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
 	rmiddleware "github.com/wundergraph/cosmo/router/internal/middleware"
 	"github.com/wundergraph/cosmo/router/internal/recoveryhandler"
 	"github.com/wundergraph/cosmo/router/internal/requestlogger"
 	"github.com/wundergraph/cosmo/router/internal/retrytransport"
-	"github.com/wundergraph/cosmo/router/pkg/config"
 	"github.com/wundergraph/cosmo/router/pkg/execution_config"
 	"github.com/wundergraph/cosmo/router/pkg/health"
 	"github.com/wundergraph/cosmo/router/pkg/logging"
 	"github.com/wundergraph/cosmo/router/pkg/statistics"
-)
-
-const (
-	featureFlagHeader = "X-Feature-Flag"
-	featureFlagCookie = "feature_flag"
 )
 
 type (
@@ -72,7 +63,7 @@ type (
 )
 
 // newGraphServer creates a new server instance.
-func newGraphServer(ctx context.Context, r *Router, routerConfig *nodev1.RouterConfig) (*graphServer, error) {
+func newGraphServer(ctx context.Context, r *Router, routerConfig *rconf.RouterConfig) (*graphServer, error) {
 	/* Older versions of composition will not populate a compatibility version.
 	 * Currently, all "old" router execution configurations are compatible as there have been no breaking
 	 * changes.
@@ -91,7 +82,7 @@ func newGraphServer(ctx context.Context, r *Router, routerConfig *nodev1.RouterC
 		engineStats:             r.EngineStats,
 		executionTransport:      newHTTPTransport(r.subgraphTransportOptions.TransportRequestOptions),
 		playgroundHandler:       r.playgroundHandler,
-		baseRouterConfigVersion: routerConfig.GetVersion(),
+		baseRouterConfigVersion: routerConfig.Version,
 		inFlightRequests:        &atomic.Uint64{},
 		graphMuxList:            make([]*graphMux, 0, 1),
 		routerListenAddr:        r.listenAddr,
@@ -121,20 +112,12 @@ func newGraphServer(ctx context.Context, r *Router, routerConfig *nodev1.RouterC
 	httpRouter.Use(middleware.RequestID)
 	httpRouter.Use(middleware.RealIP)
 
-	gm, err := s.buildGraphMux(ctx, "", s.baseRouterConfigVersion, routerConfig.GetEngineConfig(), routerConfig.GetSubgraphs())
+	gm, err := s.buildGraphMux(ctx, "", s.baseRouterConfigVersion, routerConfig.EngineConfig, routerConfig.Subgraphs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build base mux: %w", err)
 	}
 
-	featureFlagConfigMap := routerConfig.FeatureFlagConfigs.GetConfigByFeatureFlagName()
-	if len(featureFlagConfigMap) > 0 {
-		s.logger.Info("Feature flags enabled", zap.Strings("flags", maps.Keys(featureFlagConfigMap)))
-	}
-
-	multiGraphHandler, err := s.buildMultiGraphHandler(ctx, gm.mux, featureFlagConfigMap)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build feature flag handler: %w", err)
-	}
+	multiGraphHandler := gm.mux
 
 	wrapper, err := gzhttp.NewWrapper(
 		gzhttp.MinSize(1024*4), // 4KB
@@ -153,10 +136,6 @@ func newGraphServer(ctx context.Context, r *Router, routerConfig *nodev1.RouterC
 		cr.Use(func(h http.Handler) http.Handler {
 			return wrapper(h)
 		})
-
-		if s.headerRules != nil {
-			cr.Use(rmiddleware.CookieWhitelist(s.headerRules.CookieWhitelist, []string{featureFlagCookie}))
-		}
 
 		// Mount the feature flag handler. It calls the base mux if no feature flag is set.
 		cr.Handle(r.graphqlPath, multiGraphHandler)
@@ -184,51 +163,6 @@ func newGraphServer(ctx context.Context, r *Router, routerConfig *nodev1.RouterC
 	s.mux = httpRouter
 
 	return s, nil
-}
-
-func (s *graphServer) buildMultiGraphHandler(ctx context.Context, baseMux *chi.Mux, featureFlagConfigs map[string]*nodev1.FeatureFlagRouterExecutionConfig) (http.HandlerFunc, error) {
-	if len(featureFlagConfigs) == 0 {
-		return baseMux.ServeHTTP, nil
-	}
-
-	featureFlagToMux := make(map[string]*chi.Mux, len(featureFlagConfigs))
-
-	// Build all the muxes for the feature flags in serial to avoid any race conditions
-	for featureFlagName, executionConfig := range featureFlagConfigs {
-		gm, err := s.buildGraphMux(ctx,
-			featureFlagName,
-			executionConfig.GetVersion(),
-			executionConfig.GetEngineConfig(),
-			executionConfig.Subgraphs,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build mux for feature flag '%s': %w", featureFlagName, err)
-		}
-		featureFlagToMux[featureFlagName] = gm.mux
-	}
-
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Extract the feature flag and run the corresponding mux
-		// 1. From the request header
-		// 2. From the cookie
-
-		ff := strings.TrimSpace(r.Header.Get(featureFlagHeader))
-		if ff == "" {
-			cookie, err := r.Cookie(featureFlagCookie)
-			if err == nil && cookie != nil {
-				ff = strings.TrimSpace(cookie.Value)
-			}
-		}
-
-		if mux, ok := featureFlagToMux[ff]; ok {
-			w.Header().Set(featureFlagHeader, ff)
-			mux.ServeHTTP(w, r)
-			return
-		}
-
-		// Fall back to the base composition
-		baseMux.ServeHTTP(w, r)
-	}, nil
 }
 
 type graphMux struct {
@@ -333,18 +267,13 @@ func (s *graphMux) Shutdown() error {
 func (s *graphServer) buildGraphMux(ctx context.Context,
 	featureFlagName string,
 	routerConfigVersion string,
-	engineConfig *nodev1.EngineConfiguration,
-	configSubgraphs []*nodev1.Subgraph,
+	engineConfig *rconf.EngineConfiguration,
+	configSubgraphs []*rconf.Subgraph,
 ) (*graphMux, error) {
 	gm := &graphMux{}
 	httpRouter := chi.NewRouter()
 	exprManager := expr.CreateNewExprManager()
-	subgraphs, err := configureSubgraphOverwrites(
-		engineConfig,
-		configSubgraphs,
-		s.overrideRoutingURLConfiguration,
-		s.overrides,
-	)
+	subgraphs, err := configureSubgraphs(configSubgraphs)
 	if err != nil {
 		return nil, err
 	}
@@ -694,16 +623,12 @@ func (s *graphServer) Shutdown(ctx context.Context) error {
 	return finalErr
 }
 
-func configureSubgraphOverwrites(
-	engineConfig *nodev1.EngineConfiguration,
-	configSubgraphs []*nodev1.Subgraph,
-	overrideRoutingURLConfig config.OverrideRoutingURLConfiguration,
-	overrides config.OverridesConfiguration,
+func configureSubgraphs(
+	configSubgraphs []*rconf.Subgraph,
 ) ([]Subgraph, error) {
 	var err error
 	subgraphs := make([]Subgraph, 0, len(configSubgraphs))
 	for _, sg := range configSubgraphs {
-
 		subgraph := Subgraph{
 			Id:   sg.Id,
 			Name: sg.Name,
@@ -715,83 +640,6 @@ func configureSubgraphOverwrites(
 			return nil, fmt.Errorf("failed to parse subgraph url '%s': %w", sg.RoutingUrl, err)
 		}
 		subgraph.UrlString = subgraph.Url.String()
-
-		overrideURL, ok := overrideRoutingURLConfig.Subgraphs[sg.Name]
-		overrideSubgraph, overrideSubgraphOk := overrides.Subgraphs[sg.Name]
-
-		var overrideSubscriptionURL string
-		var overrideSubscriptionProtocol *common.GraphQLSubscriptionProtocol
-		var overrideSubscriptionWebsocketSubprotocol *common.GraphQLWebsocketSubprotocol
-
-		if overrideSubgraphOk {
-			if overrideSubgraph.RoutingURL != "" {
-				overrideURL = overrideSubgraph.RoutingURL
-			}
-			if overrideSubgraph.SubscriptionURL != "" {
-				overrideSubscriptionURL = overrideSubgraph.SubscriptionURL
-				_, err := url.Parse(overrideSubscriptionURL)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse override url '%s': %w", overrideSubscriptionURL, err)
-				}
-			}
-			if overrideSubgraph.SubscriptionProtocol != "" {
-				switch overrideSubgraph.SubscriptionProtocol {
-				case "ws":
-					overrideSubscriptionProtocol = common.GraphQLSubscriptionProtocol_GRAPHQL_SUBSCRIPTION_PROTOCOL_WS.Enum()
-				case "sse":
-					overrideSubscriptionProtocol = common.GraphQLSubscriptionProtocol_GRAPHQL_SUBSCRIPTION_PROTOCOL_SSE.Enum()
-				case "sse_post":
-					overrideSubscriptionProtocol = common.GraphQLSubscriptionProtocol_GRAPHQL_SUBSCRIPTION_PROTOCOL_SSE_POST.Enum()
-				default:
-					return nil, fmt.Errorf("invalid subscription protocol '%s'", overrideSubgraph.SubscriptionProtocol)
-				}
-			}
-			if overrideSubgraph.SubscriptionWebsocketSubprotocol != "" {
-				switch overrideSubgraph.SubscriptionWebsocketSubprotocol {
-				case "graphql-ws":
-					overrideSubscriptionWebsocketSubprotocol = common.GraphQLWebsocketSubprotocol_GRAPHQL_WEBSOCKET_SUBPROTOCOL_WS.Enum()
-				case "graphql-transport-ws":
-					overrideSubscriptionWebsocketSubprotocol = common.GraphQLWebsocketSubprotocol_GRAPHQL_WEBSOCKET_SUBPROTOCOL_TRANSPORT_WS.Enum()
-				case "auto":
-					overrideSubscriptionWebsocketSubprotocol = common.GraphQLWebsocketSubprotocol_GRAPHQL_WEBSOCKET_SUBPROTOCOL_AUTO.Enum()
-				default:
-					return nil, fmt.Errorf("invalid subscription websocket subprotocol '%s'", overrideSubgraph.SubscriptionWebsocketSubprotocol)
-				}
-			}
-		}
-
-		// check if the subgraph is overridden
-		if ok || overrideSubgraphOk {
-			if overrideURL != "" {
-				subgraph.Url, err = url.Parse(overrideURL)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse override url '%s': %w", overrideURL, err)
-				}
-				subgraph.UrlString = subgraph.Url.String()
-			}
-
-			// Override datasource urls
-			for _, conf := range engineConfig.DatasourceConfigurations {
-				if conf.Id == sg.Id {
-					if overrideURL != "" {
-						conf.CustomGraphql.Fetch.Url.StaticVariableContent = overrideURL
-						sg.RoutingUrl = overrideURL
-					}
-					if overrideSubscriptionURL != "" {
-						conf.CustomGraphql.Subscription.Url.StaticVariableContent = overrideSubscriptionURL
-					}
-					if overrideSubscriptionProtocol != nil {
-						conf.CustomGraphql.Subscription.Protocol = overrideSubscriptionProtocol
-					}
-					if overrideSubscriptionWebsocketSubprotocol != nil {
-						conf.CustomGraphql.Subscription.WebsocketSubprotocol = overrideSubscriptionWebsocketSubprotocol
-					}
-
-					break
-				}
-			}
-		}
-
 		subgraphs = append(subgraphs, subgraph)
 	}
 

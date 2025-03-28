@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/wundergraph/cosmo/router/internal/rconf"
 	"net"
 	"net/http"
 	"net/url"
@@ -18,7 +19,6 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
 	"github.com/wundergraph/cosmo/router/internal/debug"
 	"github.com/wundergraph/cosmo/router/internal/graphiql"
 	"github.com/wundergraph/cosmo/router/internal/retrytransport"
@@ -105,7 +105,7 @@ type (
 		logger                         *zap.Logger
 		setConfigVersionHeader         bool
 		routerGracePeriod              time.Duration
-		staticExecutionConfig          *nodev1.RouterConfig
+		staticExecutionConfig          *rconf.RouterConfig
 		shutdown                       atomic.Bool
 		bootstrapped                   atomic.Bool
 		listenAddr                     string
@@ -142,10 +142,7 @@ type (
 		tlsConfig                      *TlsConfig
 		customModules                  []Module
 		engineExecutionConfiguration   config.EngineExecutionConfiguration
-		// should be removed once the users have migrated to the new overrides config
-		overrideRoutingURLConfiguration config.OverrideRoutingURLConfiguration
 		// the new overrides config
-		overrides                  config.OverridesConfiguration
 		authorization              *config.AuthorizationConfiguration
 		webSocketConfiguration     *config.WebSocketConfiguration
 		subgraphErrorPropagation   config.SubgraphErrorPropagationConfiguration
@@ -369,7 +366,7 @@ func NewRouter(opts ...Option) (*Router, error) {
 }
 
 // newGraphServer creates a new server.
-func (r *Router) newServer(ctx context.Context, cfg *nodev1.RouterConfig) error {
+func (r *Router) newServer(ctx context.Context, cfg *rconf.RouterConfig) error {
 	server, err := newGraphServer(ctx, r, cfg)
 	if err != nil {
 		r.logger.Error("Failed to create graph server. Keeping the old server", zap.Error(err))
@@ -581,7 +578,7 @@ func (r *Router) Start(ctx context.Context) error {
 
 	// Start the server with the static config without polling
 	if r.staticExecutionConfig == nil {
-		r.logger.Error("Server only works with static execution configuration")
+		return fmt.Errorf("server only works with static execution configuration")
 	}
 	if err := r.listenAndServe(); err != nil {
 		return err
@@ -729,7 +726,7 @@ func WithExecutionConfig(cfg *ExecutionConfig) Option {
 }
 
 // WithStaticExecutionConfig sets the static execution config. This disables polling and file watching.
-func WithStaticExecutionConfig(cfg *nodev1.RouterConfig) Option {
+func WithStaticExecutionConfig(cfg *rconf.RouterConfig) Option {
 	return func(r *Router) {
 		r.staticExecutionConfig = cfg
 	}
@@ -762,18 +759,6 @@ func WithHeaderRules(headers config.HeaderRules) Option {
 func WithCacheControlPolicy(cfg config.CacheControlPolicy) Option {
 	return func(r *Router) {
 		r.cacheControlPolicy = cfg
-	}
-}
-
-func WithOverrideRoutingURL(overrideRoutingURL config.OverrideRoutingURLConfiguration) Option {
-	return func(r *Router) {
-		r.overrideRoutingURLConfiguration = overrideRoutingURL
-	}
-}
-
-func WithOverrides(overrides config.OverridesConfiguration) Option {
-	return func(r *Router) {
-		r.overrides = overrides
 	}
 }
 
