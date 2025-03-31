@@ -59,32 +59,30 @@ func (e *reportError) Report() *operationreport.Report {
 }
 
 type HandlerOptions struct {
-	Executor                                    *Executor
-	Log                                         *zap.Logger
-	EnableExecutionPlanCacheResponseHeader      bool
-	EnablePersistedOperationCacheResponseHeader bool
-	EnableNormalizationCacheResponseHeader      bool
-	EnableResponseHeaderPropagation             bool
-	EngineStats                                 statistics.EngineStatistics
-	Authorizer                                  *CosmoAuthorizer
-	SubgraphErrorPropagation                    config.SubgraphErrorPropagationConfiguration
-	EngineLoaderHooks                           resolve.LoaderHooks
-	ApolloSubscriptionMultipartPrintBoundary    bool
+	Executor                                 *Executor
+	Log                                      *zap.Logger
+	EnableExecutionPlanCacheResponseHeader   bool
+	EnableNormalizationCacheResponseHeader   bool
+	EnableResponseHeaderPropagation          bool
+	EngineStats                              statistics.EngineStatistics
+	Authorizer                               *CosmoAuthorizer
+	SubgraphErrorPropagation                 config.SubgraphErrorPropagationConfiguration
+	EngineLoaderHooks                        resolve.LoaderHooks
+	ApolloSubscriptionMultipartPrintBoundary bool
 }
 
 func NewGraphQLHandler(opts HandlerOptions) *GraphQLHandler {
 	graphQLHandler := &GraphQLHandler{
-		log:                                    opts.Log,
-		executor:                               opts.Executor,
-		enableExecutionPlanCacheResponseHeader: opts.EnableExecutionPlanCacheResponseHeader,
-		enablePersistedOperationCacheResponseHeader: opts.EnablePersistedOperationCacheResponseHeader,
-		enableNormalizationCacheResponseHeader:      opts.EnableNormalizationCacheResponseHeader,
-		enableResponseHeaderPropagation:             opts.EnableResponseHeaderPropagation,
-		engineStats:                                 opts.EngineStats,
-		authorizer:                                  opts.Authorizer,
-		subgraphErrorPropagation:                    opts.SubgraphErrorPropagation,
-		engineLoaderHooks:                           opts.EngineLoaderHooks,
-		apolloSubscriptionMultipartPrintBoundary:    opts.ApolloSubscriptionMultipartPrintBoundary,
+		log:                                      opts.Log,
+		executor:                                 opts.Executor,
+		enableExecutionPlanCacheResponseHeader:   opts.EnableExecutionPlanCacheResponseHeader,
+		enableNormalizationCacheResponseHeader:   opts.EnableNormalizationCacheResponseHeader,
+		enableResponseHeaderPropagation:          opts.EnableResponseHeaderPropagation,
+		engineStats:                              opts.EngineStats,
+		authorizer:                               opts.Authorizer,
+		subgraphErrorPropagation:                 opts.SubgraphErrorPropagation,
+		engineLoaderHooks:                        opts.EngineLoaderHooks,
+		apolloSubscriptionMultipartPrintBoundary: opts.ApolloSubscriptionMultipartPrintBoundary,
 	}
 	return graphQLHandler
 }
@@ -107,11 +105,10 @@ type GraphQLHandler struct {
 	subgraphErrorPropagation config.SubgraphErrorPropagationConfiguration
 	engineLoaderHooks        resolve.LoaderHooks
 
-	enableExecutionPlanCacheResponseHeader      bool
-	enablePersistedOperationCacheResponseHeader bool
-	enableNormalizationCacheResponseHeader      bool
-	enableResponseHeaderPropagation             bool
-	apolloSubscriptionMultipartPrintBoundary    bool
+	enableExecutionPlanCacheResponseHeader   bool
+	enableNormalizationCacheResponseHeader   bool
+	enableResponseHeaderPropagation          bool
+	apolloSubscriptionMultipartPrintBoundary bool
 }
 
 func (h *GraphQLHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -334,13 +331,6 @@ func (h *GraphQLHandler) setDebugCacheHeaders(w http.ResponseWriter, opCtx *oper
 			w.Header().Set(NormalizationCacheHeader, "HIT")
 		} else {
 			w.Header().Set(NormalizationCacheHeader, "MISS")
-		}
-	}
-	if h.enablePersistedOperationCacheResponseHeader {
-		if opCtx.persistedOperationCacheHit {
-			w.Header().Set(PersistedOperationCacheHeader, "HIT")
-		} else {
-			w.Header().Set(PersistedOperationCacheHeader, "MISS")
 		}
 	}
 	if h.enableExecutionPlanCacheResponseHeader {

@@ -14,8 +14,7 @@ import (
 // LoadStringVariable is a shorthand for LookupStringVariable when you do not care about
 // the value being explicitly set
 func LoadStringVariable(variable *rconf.ConfigurationVariable) string {
-	val, _ := LookupStringVariable(variable)
-	return val
+	return LookupStringVariable(variable)
 }
 
 // LookupStringVariable returns the value for the given configuration variable as well
@@ -24,23 +23,21 @@ func LoadStringVariable(variable *rconf.ConfigurationVariable) string {
 // Otherwise, (e.g. environment variable set but empty, static string), the
 // second return value is true. If you don't need to know if the variable
 // was explicitly set, use LoadStringVariable.
-func LookupStringVariable(variable *rconf.ConfigurationVariable) (string, bool) {
+func LookupStringVariable(variable *rconf.ConfigurationVariable) string {
 	if variable == nil {
-		return "", false
+		return ""
 	}
 	switch variable.Kind {
 	case rconf.ConfigurationVariableKind_ENV_CONFIGURATION_VARIABLE:
 		if varName := variable.EnvironmentVariableName; varName != "" {
 			value, found := os.LookupEnv(variable.EnvironmentVariableName)
 			if found {
-				return value, found
+				return value
 			}
 		}
 		defValue := variable.EnvironmentVariableDefaultValue
-		return defValue, defValue != ""
-	case rconf.ConfigurationVariableKind_STATIC_CONFIGURATION_VARIABLE:
-		return variable.StaticVariableContent, true
+		return defValue
 	default:
-		panic("unhandled wgpb.ConfigurationVariableKind")
+		return variable.StaticVariableContent
 	}
 }

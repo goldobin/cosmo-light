@@ -30,7 +30,7 @@ func TestSubgraphAccessLogger(t *testing.T) {
 			Err:             nil,
 			Request:         req,
 			ResponseHeaders: nil,
-		}, nil))
+		}))
 
 		require.Equal(t, 1, logObserver.Len())
 		requestContext := logObserver.All()[0].ContextMap()
@@ -39,13 +39,13 @@ func TestSubgraphAccessLogger(t *testing.T) {
 			"method":   "POST",
 			"path":     "/graphql",
 			"query":    "",
-			"ip":       "",
+			"ip":       "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 		}
 		additionalExpectedKeys := []string{"user_agent", "hostname", "pid", "url"}
 		checkValues(t, requestContext, expectedValues, additionalExpectedKeys)
 	})
 
-	t.Run("Should include IP as custom attribute if requested", func(t *testing.T) {
+	t.Run("Should hash client IP and add it as a custom attribute", func(t *testing.T) {
 		var zCore zapcore.Core
 		zCore, logObserver := observer.New(zapcore.InfoLevel)
 		l := logging.NewZapLoggerWithCore(zCore, true)
@@ -59,7 +59,7 @@ func TestSubgraphAccessLogger(t *testing.T) {
 			Err:             nil,
 			Request:         req,
 			ResponseHeaders: nil,
-		}, nil))
+		}))
 
 		require.Equal(t, 1, logObserver.Len())
 		requestContext := logObserver.All()[0].ContextMap()
@@ -68,75 +68,7 @@ func TestSubgraphAccessLogger(t *testing.T) {
 			"method":   "POST",
 			"path":     "/graphql",
 			"query":    "",
-			"ip":       "my-test",
-		}
-		additionalExpectedKeys := []string{"user_agent", "hostname", "pid", "url"}
-		checkValues(t, requestContext, expectedValues, additionalExpectedKeys)
-	})
-
-	t.Run("Should redact client IP and add as a custom attribute", func(t *testing.T) {
-		var zCore zapcore.Core
-		zCore, logObserver := observer.New(zapcore.InfoLevel)
-		l := logging.NewZapLoggerWithCore(zCore, true)
-
-		subgraphLogger := requestlogger.NewSubgraphAccessLogger(l, requestlogger.SubgraphOptions{
-			IPAnonymizationConfig: &requestlogger.IPAnonymizationConfig{
-				Enabled: true,
-				Method:  requestlogger.Redact,
-			},
-		})
-		req, err := http.NewRequest("POST", "http://localhost:3002/graphql", nil)
-		req.RemoteAddr = "my-test"
-		require.NoError(t, err)
-		subgraphLogger.Info("", subgraphLogger.RequestFields(&resolve.ResponseInfo{
-			StatusCode:      200,
-			Err:             nil,
-			Request:         req,
-			ResponseHeaders: nil,
-		}, nil))
-
-		require.Equal(t, 1, logObserver.Len())
-		requestContext := logObserver.All()[0].ContextMap()
-		expectedValues := map[string]interface{}{
-			"log_type": "client/subgraph",
-			"method":   "POST",
-			"path":     "/graphql",
-			"query":    "",
-			"ip":       "[REDACTED]",
-		}
-		additionalExpectedKeys := []string{"user_agent", "hostname", "pid", "url"}
-		checkValues(t, requestContext, expectedValues, additionalExpectedKeys)
-	})
-
-	t.Run("Should hash client IP and add it as a custom attribute", func(t *testing.T) {
-		var zCore zapcore.Core
-		zCore, logObserver := observer.New(zapcore.InfoLevel)
-		l := logging.NewZapLoggerWithCore(zCore, true)
-
-		subgraphLogger := requestlogger.NewSubgraphAccessLogger(l, requestlogger.SubgraphOptions{
-			IPAnonymizationConfig: &requestlogger.IPAnonymizationConfig{
-				Enabled: true,
-				Method:  requestlogger.Hash,
-			},
-		})
-		req, err := http.NewRequest("POST", "http://localhost:3002/graphql", nil)
-		req.RemoteAddr = "my-test"
-		require.NoError(t, err)
-		subgraphLogger.Info("", subgraphLogger.RequestFields(&resolve.ResponseInfo{
-			StatusCode:      200,
-			Err:             nil,
-			Request:         req,
-			ResponseHeaders: nil,
-		}, nil))
-
-		require.Equal(t, 1, logObserver.Len())
-		requestContext := logObserver.All()[0].ContextMap()
-		expectedValues := map[string]interface{}{
-			"log_type": "client/subgraph",
-			"method":   "POST",
-			"path":     "/graphql",
-			"query":    "",
-			"ip":       "6d792d74657374e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			"ip":       "sha256:6d792d74657374e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 		}
 		additionalExpectedKeys := []string{"user_agent", "hostname", "pid", "url"}
 		checkValues(t, requestContext, expectedValues, additionalExpectedKeys)
@@ -175,7 +107,7 @@ func TestSubgraphAccessLogger(t *testing.T) {
 			ResponseHeaders: map[string][]string{
 				"Test-Response-Header": {"test-response-value"},
 			},
-		}, nil))
+		}))
 
 		require.Equal(t, 1, logObserver.Len())
 		requestContext := logObserver.All()[0].ContextMap()
@@ -184,7 +116,7 @@ func TestSubgraphAccessLogger(t *testing.T) {
 			"method":        "POST",
 			"path":          "/graphql",
 			"query":         "",
-			"ip":            "",
+			"ip":            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
 			"test":          "test-value",
 			"test-response": "test-response-value",
 		}
@@ -234,7 +166,7 @@ func TestSubgraphAccessLogger(t *testing.T) {
 			ResponseHeaders: map[string][]string{
 				"Test-Response-Header": {"test-response-value"},
 			},
-		}, nil))
+		}))
 
 		require.Equal(t, 1, logObserver.Len())
 		requestContext := logObserver.All()[0].ContextMap()

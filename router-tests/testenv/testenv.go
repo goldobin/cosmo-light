@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nats-io/nats.go/jetstream"
 	"io"
 	"log"
 	"math/rand"
@@ -709,15 +710,13 @@ func configureRouter(listenerAddr string, testConfig *Config, routerConfig *node
 	engineExecutionConfig := config.EngineExecutionConfiguration{
 		EnableNetPoll:                          true,
 		EnableSingleFlight:                     true,
-		EnableRequestTracing:                   true,
 		EnableExecutionPlanCacheResponseHeader: true,
 		EnableNormalizationCache:               true,
 		NormalizationCacheSize:                 1024,
 		Debug: config.EngineDebugConfiguration{
-			ReportWebSocketConnections:                   true,
-			PrintQueryPlans:                              false,
-			EnablePersistedOperationsCacheResponseHeader: true,
-			EnableNormalizationCacheResponseHeader:       true,
+			ReportWebSocketConnections:             true,
+			PrintQueryPlans:                        false,
+			EnableNormalizationCacheResponseHeader: true,
 		},
 		WebSocketClientPollTimeout:    300 * time.Millisecond,
 		WebSocketClientConnBufferSize: 1,

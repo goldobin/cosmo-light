@@ -1,7 +1,7 @@
 package config
 
 import (
-	"regexp"
+	"os"
 	"testing"
 	"time"
 
@@ -121,52 +121,6 @@ func TestErrorWhenConfigNotExists(t *testing.T) {
 
 	require.Error(t, err)
 	require.ErrorContains(t, err, "could not read custom config file ./fixtures/not_exists.yaml: open ./fixtures/not_exists.yaml: no such file or directory")
-}
-
-func TestRegexDecoding(t *testing.T) {
-	t.Parallel()
-
-	f := createTempFileFromFixture(t, `
-version: '1'
-
-graph:
-  token: "mytoken"
-
-telemetry:
-  metrics:
-    prometheus:
-      # Interpreted as RegEx
-      exclude_metrics: []
-      exclude_metric_labels: []
-`)
-
-	cfg, err := LoadConfig(f, "")
-
-	require.NoError(t, err)
-	require.Empty(t, cfg.Config.Telemetry.Metrics.Prometheus.ExcludeMetrics)
-	require.Empty(t, cfg.Config.Telemetry.Metrics.Prometheus.ExcludeMetricLabels)
-
-	f = createTempFileFromFixture(t, `
-version: '1'
-
-graph:
-  token: "mytoken"
-
-telemetry:
-  metrics:
-    prometheus:
-      # Interpreted as RegEx
-      exclude_metrics: ["^go_.*", "^process_.*"]
-      exclude_metric_labels: ["^instance"]
-`)
-
-	cfg, err = LoadConfig(f, "")
-
-	require.NoError(t, err)
-	require.Len(t, cfg.Config.Telemetry.Metrics.Prometheus.ExcludeMetrics, 2)
-	require.Len(t, cfg.Config.Telemetry.Metrics.Prometheus.ExcludeMetricLabels, 1)
-	require.Equal(t, RegExArray{regexp.MustCompile("^go_.*"), regexp.MustCompile("^process_.*")}, cfg.Config.Telemetry.Metrics.Prometheus.ExcludeMetrics)
-	require.Equal(t, RegExArray{regexp.MustCompile("^instance")}, cfg.Config.Telemetry.Metrics.Prometheus.ExcludeMetricLabels)
 }
 
 func TestErrorWhenEnvVariableConfigNotExists(t *testing.T) {
@@ -577,22 +531,14 @@ client_header:
 	require.NoError(t, err)
 }
 
-func TestPrefixedMetricEngineConfig(t *testing.T) {
-	f := createTempFileFromFixture(t, `
-version: "1"
-`)
-	c, err := LoadConfig(f, "")
+func createTempFileFromFixture(t *testing.T, fixture string) string {
+	t.Helper()
+
+	f, err := os.CreateTemp(t.TempDir(), "config_test")
 	require.NoError(t, err)
 
-	require.False(t, c.Config.Telemetry.Metrics.Prometheus.EngineStats.Subscriptions)
-	require.False(t, c.Config.Telemetry.Metrics.OTLP.EngineStats.Subscriptions)
-
-	t.Setenv("PROMETHEUS_ENGINE_STATS_SUBSCRIPTIONS", "true")
-	t.Setenv("METRICS_OTLP_ENGINE_STATS_SUBSCRIPTIONS", "true")
-
-	c, err = LoadConfig(f, "")
+	_, err = f.WriteString(fixture)
 	require.NoError(t, err)
 
-	require.True(t, c.Config.Telemetry.Metrics.Prometheus.EngineStats.Subscriptions)
-	require.True(t, c.Config.Telemetry.Metrics.OTLP.EngineStats.Subscriptions)
+	return f.Name()
 }

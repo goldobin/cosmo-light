@@ -24,7 +24,6 @@ func TestTimeoutTransport(t *testing.T) {
 			&SubgraphTransportOptions{},
 			http.DefaultTransport,
 			zap.NewNop(),
-			http.ProxyFromEnvironment,
 		)
 
 		resp, err := timeoutTransport.RoundTrip(nil)
@@ -39,7 +38,6 @@ func TestTimeoutTransport(t *testing.T) {
 			&SubgraphTransportOptions{},
 			http.DefaultTransport,
 			zap.NewNop(),
-			http.ProxyFromEnvironment,
 		)
 
 		req := httptest.NewRequest("GET", "http://example.com", nil)
@@ -76,7 +74,6 @@ func TestTimeoutTransport(t *testing.T) {
 			transportOpts,
 			http.DefaultTransport,
 			zap.NewNop(),
-			http.ProxyFromEnvironment,
 		)
 
 		resp, err := timeoutTransport.RoundTrip(req)
@@ -114,7 +111,6 @@ func TestTimeoutTransport(t *testing.T) {
 			transportOpts,
 			http.DefaultTransport,
 			zap.NewNop(),
-			http.ProxyFromEnvironment,
 		)
 
 		resp, err := timeoutTransport.RoundTrip(req)
@@ -147,7 +143,6 @@ func TestTimeoutTransport(t *testing.T) {
 			transportOpts,
 			http.DefaultTransport,
 			zap.NewNop(),
-			http.ProxyFromEnvironment,
 		)
 
 		resp, err := timeoutTransport.RoundTrip(req)
