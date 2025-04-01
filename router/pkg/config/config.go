@@ -7,8 +7,6 @@ import (
 
 	"github.com/caarlos0/env/v11"
 	"github.com/goccy/go-yaml"
-	"github.com/joho/godotenv"
-
 	"github.com/wundergraph/cosmo/router/internal/unique"
 )
 
@@ -722,13 +720,6 @@ type LoadResult struct {
 }
 
 func LoadConfig(configFilePath string, envOverride string) (*LoadResult, error) {
-	_ = godotenv.Load(".env.local")
-	_ = godotenv.Load()
-
-	if envOverride != "" {
-		_ = godotenv.Overload(envOverride)
-	}
-
 	cfg := &LoadResult{
 		Config:        Config{},
 		DefaultLoaded: true,

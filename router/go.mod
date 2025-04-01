@@ -3,45 +3,40 @@ module github.com/wundergraph/cosmo/router
 go 1.23
 
 require (
+	github.com/KimMachineGun/automemlimit v0.6.1
+	github.com/MicahParks/jwkset v0.5.19
+	github.com/MicahParks/keyfunc/v3 v3.3.5
 	github.com/buger/jsonparser v1.1.1
+	github.com/caarlos0/env/v11 v11.3.1
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/cloudflare/backoff v0.0.0-20161212185259-647f3cdfc87a
+	github.com/dgraph-io/ristretto/v2 v2.1.0
 	github.com/dustin/go-humanize v1.0.1
+	github.com/expr-lang/expr v1.17.0
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/gobwas/ws v1.4.0
 	github.com/goccy/go-yaml v1.13.4
 	github.com/golang-jwt/jwt/v5 v5.2.2
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.1
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/go-retryablehttp v0.7.7
 	github.com/jensneuse/abstractlogger v0.0.4
-	github.com/joho/godotenv v1.5.1
+	github.com/klauspost/compress v1.17.9
 	github.com/mitchellh/mapstructure v1.5.0
+	github.com/pkg/errors v0.9.1
+	github.com/pquerna/cachecontrol v0.2.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1
 	github.com/sebdah/goldie/v2 v2.5.3
 	github.com/stretchr/testify v1.10.0
 	github.com/tidwall/gjson v1.18.0
 	github.com/tidwall/sjson v1.2.5
+	github.com/wundergraph/astjson v0.0.0-20250106123708-be463c97e083
 	github.com/wundergraph/graphql-go-tools/v2 v2.0.0-rc.166
 	go.uber.org/atomic v1.11.0
 	go.uber.org/automaxprocs v1.5.3
 	go.uber.org/zap v1.27.0
 	golang.org/x/sync v0.10.0
-	golang.org/x/sys v0.29.0 // indirect
-)
-
-require (
-	github.com/KimMachineGun/automemlimit v0.6.1
-	github.com/MicahParks/jwkset v0.5.19
-	github.com/MicahParks/keyfunc/v3 v3.3.5
-	github.com/caarlos0/env/v11 v11.3.1
-	github.com/dgraph-io/ristretto/v2 v2.1.0
-	github.com/expr-lang/expr v1.17.0
-	github.com/google/uuid v1.6.0
-	github.com/klauspost/compress v1.17.9
-	github.com/pkg/errors v0.9.1
-	github.com/pquerna/cachecontrol v0.2.0
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.1
-	github.com/wundergraph/astjson v0.0.0-20250106123708-be463c97e083
 	golang.org/x/text v0.21.0
 	golang.org/x/time v0.5.0
 )
@@ -75,6 +70,7 @@ require (
 	github.com/vektah/gqlparser/v2 v2.5.16 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.33.0 // indirect
+	golang.org/x/sys v0.29.0 // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
 	gopkg.in/cenkalti/backoff.v1 v1.1.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
