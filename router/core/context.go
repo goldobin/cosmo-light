@@ -415,7 +415,6 @@ type operationContext struct {
 	persistedID      string
 	// Hash on the original operation
 	sha256Hash string
-	protocol   OperationProtocol
 
 	persistedOperationCacheHit bool
 	normalizationCacheHit      bool
@@ -452,10 +451,6 @@ func (o *operationContext) Content() string {
 
 func (o *operationContext) PersistedID() string {
 	return o.persistedID
-}
-
-func (o *operationContext) Protocol() OperationProtocol {
-	return o.protocol
 }
 
 func (o *operationContext) ClientInfo() ClientInfo {

@@ -132,7 +132,6 @@ func (h *PreHandler) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		requestContext.operation.protocol = OperationProtocolHTTP
 		requestContext.operation.executionOptions = executionOptions
 		requestContext.operation.traceOptions = traceOptions
 

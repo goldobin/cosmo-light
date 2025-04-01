@@ -20,7 +20,6 @@ import (
 	"github.com/gobwas/ws/wsutil"
 	"github.com/gorilla/websocket"
 	"github.com/tidwall/gjson"
-	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/semaphore"
@@ -205,8 +204,7 @@ type WebsocketHandler struct {
 	handlerSem    *semaphore.Weighted
 	connectionIDs atomic.Int64
 
-	stats      statistics.EngineStatistics
-	attributes []attribute.KeyValue
+	stats statistics.EngineStatistics
 
 	readTimeout time.Duration
 
@@ -313,7 +311,6 @@ func (h *WebsocketHandler) handleUpgradeRequest(w http.ResponseWriter, r *http.R
 		Config:                    h.config,
 		ForwardUpgradeHeaders:     h.forwardUpgradeHeadersConfig,
 		ForwardQueryParams:        h.forwardQueryParamsConfig,
-		Attributes:                h.attributes,
 		DisableVariablesRemapping: h.disableVariablesRemapping,
 		ApolloCompatibilityFlags:  h.apolloCompatibilityFlags,
 	})
@@ -650,7 +647,6 @@ type WebSocketConnectionHandlerOptions struct {
 	InitRequestID             string
 	ForwardUpgradeHeaders     forwardConfig
 	ForwardQueryParams        forwardConfig
-	Attributes                []attribute.KeyValue
 	DisableVariablesRemapping bool
 	ApolloCompatibilityFlags  config.ApolloCompatibilityFlags
 }
@@ -680,10 +676,7 @@ type WebSocketConnectionHandler struct {
 	subscriptions   sync.Map
 	stats           statistics.EngineStatistics
 
-	attributes []attribute.KeyValue
-
 	forwardInitialPayload bool
-
 	forwardUpgradeHeaders *forwardConfig
 	forwardQueryParams    *forwardConfig
 
@@ -724,7 +717,6 @@ func NewWebsocketConnectionHandler(ctx context.Context, opts WebSocketConnection
 		forwardQueryParams:        &opts.ForwardQueryParams,
 		forwardInitialPayload:     opts.Config != nil && opts.Config.ForwardInitialPayload,
 		plannerOptions:            opts.PlanOptions,
-		attributes:                opts.Attributes,
 		disableVariablesRemapping: opts.DisableVariablesRemapping,
 		apolloCompatibilityFlags:  opts.ApolloCompatibilityFlags,
 	}
