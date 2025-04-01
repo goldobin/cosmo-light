@@ -2,13 +2,13 @@ package core
 
 import (
 	"fmt"
+	"go.opentelemetry.io/otel/attribute"
 	"reflect"
 
 	"github.com/expr-lang/expr/ast"
 	"github.com/expr-lang/expr/vm"
 	"github.com/wundergraph/cosmo/router/internal/expr"
 	"github.com/wundergraph/cosmo/router/pkg/config"
-	"go.opentelemetry.io/otel/attribute"
 )
 
 // attributeExpressions maps context attributes to custom attributes.

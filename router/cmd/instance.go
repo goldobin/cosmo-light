@@ -3,10 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"github.com/dustin/go-humanize"
 	"os"
 
 	"github.com/KimMachineGun/automemlimit/memlimit"
-	"github.com/dustin/go-humanize"
 	"github.com/wundergraph/cosmo/router/core"
 	"github.com/wundergraph/cosmo/router/pkg/authentication"
 	"github.com/wundergraph/cosmo/router/pkg/config"

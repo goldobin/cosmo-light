@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/wundergraph/cosmo/router/internal/rconf"
 	"net"
 	"net/http"
@@ -15,7 +16,6 @@ import (
 	"time"
 
 	"github.com/mitchellh/mapstructure"
-	"github.com/nats-io/nuid"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -193,7 +193,7 @@ func NewRouter(opts ...Option) (*Router, error) {
 	}
 
 	if r.instanceID == "" {
-		r.instanceID = nuid.Next()
+		r.instanceID = uuid.NewString()
 	}
 
 	r.processStartTime = time.Now()

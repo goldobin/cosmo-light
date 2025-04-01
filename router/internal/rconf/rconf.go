@@ -2,7 +2,6 @@ package rconf
 
 import (
 	"encoding/json"
-	"google.golang.org/protobuf/runtime/protoimpl"
 )
 
 type Subgraph struct {
@@ -99,10 +98,6 @@ type DataSourceConfiguration struct {
 }
 
 type DataSourceCustom_Static struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
 	Data *ConfigurationVariable `json:"data,omitempty"`
 }
 
@@ -138,10 +133,6 @@ type DirectiveConfiguration struct {
 }
 
 type RequiredField struct {
-	state         protoimpl.MessageState
-	sizeCache     protoimpl.SizeCache
-	unknownFields protoimpl.UnknownFields
-
 	TypeName              string               `json:"typeName,omitempty"`
 	FieldName             string               `json:"fieldName,omitempty"`
 	SelectionSet          string               `json:"selectionSet,omitempty"`
