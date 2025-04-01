@@ -2,7 +2,7 @@ name: Playground CI
 on:
   pull_request:
     paths:
-      - 'playground/**/*'
+      - '../../playground.1/**/*'
       - '.github/workflows/playground-ci.yaml'
 
 concurrency:

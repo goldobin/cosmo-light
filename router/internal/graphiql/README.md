@@ -1,6 +1,6 @@
 This directory contains a custom built version of graphiql that is used in the studio.
 
-The original source code is [here](/playground).
+The original source code is [here](/playground.1).
 
 To work with go embed the following setup is used for graphiql in the original source code.
 
