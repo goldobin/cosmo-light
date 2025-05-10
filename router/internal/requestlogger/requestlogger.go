@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"github.com/wundergraph/cosmo/router/internal/errors"
 	"github.com/wundergraph/cosmo/router/pkg/config"
-	"github.com/wundergraph/cosmo/router/pkg/logging"
-	rtrace "github.com/wundergraph/cosmo/router/pkg/trace"
 	"net"
 	"net/http"
 	"time"
@@ -31,11 +29,6 @@ type ContextFunc func(
 // whether to print stack traces on panic.
 type (
 	Option func(handler *handler)
-
-	IPAnonymizationConfig struct {
-		Enabled bool
-		Method  IPAnonymizationMethod
-	}
 )
 
 type IPAnonymizationMethod string
@@ -68,12 +61,6 @@ func WithAttributes(attributes []config.CustomAttribute) Option {
 func WithExprAttributes(attributes []ExpressionAttribute) Option {
 	return func(r *handler) {
 		r.accessLogger.exprAttributes = attributes
-	}
-}
-
-func WithAnonymization(ipConfig *IPAnonymizationConfig) Option {
-	return func(r *handler) {
-		r.accessLogger.ipAnonymizationConfig = ipConfig
 	}
 }
 
@@ -191,18 +178,10 @@ func (al *accessLogger) getRequestFields(r *http.Request) []zapcore.Field {
 	path := url.Path
 	query := url.RawQuery
 	remoteAddr := r.RemoteAddr
-
-	if al.ipAnonymizationConfig != nil && al.ipAnonymizationConfig.Enabled {
-		if al.ipAnonymizationConfig.Method == Hash {
-			h := sha256.New()
-			remoteAddr = fmt.Sprintf("%x", h.Sum([]byte(r.RemoteAddr)))
-		} else if al.ipAnonymizationConfig.Method == Redact {
-			remoteAddr = "[REDACTED]"
-		}
-	}
+	h := sha256.New()
+	remoteAddr = fmt.Sprintf("sha256:%x", h.Sum([]byte(r.RemoteAddr)))
 
 	// All fields are snake_case
-
 	fields := []zapcore.Field{
 		zap.String("method", r.Method),
 		zap.String("path", path),
@@ -222,13 +201,6 @@ func (al *accessLogger) getRequestFields(r *http.Request) []zapcore.Field {
 
 	if al.timeFormat != "" {
 		fields = append(fields, zap.String("time", start.Format(al.timeFormat)))
-	}
-
-	if al.traceID {
-		traceID := rtrace.GetTraceID(r.Context())
-		if traceID != "" {
-			fields = append(fields, logging.WithTraceID(traceID))
-		}
 	}
 
 	return fields

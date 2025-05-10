@@ -1,1 +1,0 @@
-ALTER TABLE "schema_versions" ADD COLUMN "is_composable" boolean DEFAULT false NOT NULL;

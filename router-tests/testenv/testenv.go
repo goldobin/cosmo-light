@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nats-io/nats.go/jetstream"
 	"io"
 	"log"
 	"math/rand"
@@ -24,9 +25,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -36,12 +35,8 @@ import (
 	"github.com/hashicorp/consul/sdk/freeport"
 	"github.com/hashicorp/go-cleanhttp"
 	"github.com/hashicorp/go-retryablehttp"
-	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
-	"github.com/twmb/franz-go/pkg/kadm"
-	"github.com/twmb/franz-go/pkg/kgo"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.opentelemetry.io/otel/sdk/trace"
@@ -57,7 +52,6 @@ import (
 	"github.com/wundergraph/cosmo/router/core"
 	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
 	"github.com/wundergraph/cosmo/router/pkg/config"
-	"github.com/wundergraph/cosmo/router/pkg/controlplane/configpoller"
 	"github.com/wundergraph/cosmo/router/pkg/logging"
 	rmetric "github.com/wundergraph/cosmo/router/pkg/metric"
 	pubsubNats "github.com/wundergraph/cosmo/router/pkg/pubsub/nats"
@@ -231,8 +225,7 @@ func assertCacheMetrics(t testing.TB, env *Environment, expected CacheMetricsAss
 }
 
 type RouterConfig struct {
-	StaticConfig        *nodev1.RouterConfig
-	ConfigPollerFactory func(config *nodev1.RouterConfig) configpoller.ConfigPoller
+	StaticConfig *nodev1.RouterConfig
 }
 
 type MetricExclusions struct {
@@ -265,10 +258,8 @@ type Config struct {
 	RouterConfigJSONTemplate           string
 	ModifyRouterConfig                 func(routerConfig *nodev1.RouterConfig)
 	ModifyEngineExecutionConfiguration func(engineExecutionConfiguration *config.EngineExecutionConfiguration)
-	ModifySecurityConfiguration        func(securityConfiguration *config.SecurityConfiguration)
 	ModifySubgraphErrorPropagation     func(subgraphErrorPropagation *config.SubgraphErrorPropagationConfiguration)
 	ModifyWebsocketConfiguration       func(websocketConfiguration *config.WebSocketConfiguration)
-	ModifyCDNConfig                    func(cdnConfig *config.CDNConfiguration)
 	KafkaSeeds                         []string
 	DisableWebSockets                  bool
 	DisableParentBasedSampler          bool
@@ -284,7 +275,6 @@ type Config struct {
 	NoRetryClient                      bool
 	PropagationConfig                  config.PropagationConfig
 	CacheControlPolicy                 config.CacheControlPolicy
-	ApqConfig                          config.AutomaticPersistedQueriesConfig
 	LogObservation                     LogObservationConfig
 	ClientHeader                       config.ClientHeader
 	ResponseTraceHeader                config.ResponseTraceHeader
@@ -292,7 +282,6 @@ type Config struct {
 	AccessLogger                       *zap.Logger
 	AccessLogFields                    []config.CustomAttribute
 	MetricOptions                      MetricOptions
-	ModifyEventsConfiguration          func(cfg *config.EventsConfiguration)
 	EnableRuntimeMetrics               bool
 	EnableNats                         bool
 	EnableKafka                        bool
@@ -300,8 +289,6 @@ type Config struct {
 	SubgraphAccessLogFields            []config.CustomAttribute
 	AssertCacheMetrics                 *CacheMetricsAssertions
 	DisableSimulateCloudExporter       bool
-	CdnSever                           *httptest.Server
-	UseVersionedGraph                  bool
 }
 
 type CacheMetricsAssertions struct {
@@ -350,67 +337,8 @@ type LogObservationConfig struct {
 func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 	t.Helper()
 
-	var (
-		kafkaAdminClient *kadm.Client
-		kafkaStarted     sync.WaitGroup
-		kafkaClient      *kgo.Client
-		natsStarted      sync.WaitGroup
-		natsSetup        *NatsData
-		kafkaSetup       *KafkaData
-		pubSubPrefix     = strconv.FormatUint(rand.Uint64(), 16)
-	)
-
 	if len(cfg.KafkaSeeds) == 0 {
 		cfg.KafkaSeeds = []string{"localhost:9092"}
-	}
-
-	if cfg.EnableKafka {
-		// Depending on whether or not we are in CI e.g. Github Actions, we
-		// either start a kafka container or use the one provided by the CI
-		// This is faster in GHA due to pitiful DIND speed, and helps prevent timeout
-		// related errors (for now)
-		if os.Getenv("CI") == "true" {
-			cfg.KafkaSeeds = []string{"localhost:9092"}
-
-			client, err := kgo.NewClient(
-				kgo.SeedBrokers(cfg.KafkaSeeds...),
-			)
-			if err != nil {
-				return nil, err
-			}
-
-			kafkaClient = client
-			kafkaAdminClient = kadm.NewClient(kafkaClient)
-		} else {
-			kafkaStarted.Add(1)
-			go func() {
-				defer kafkaStarted.Done()
-
-				var kafkaSetupErr error
-				kafkaSetup, kafkaSetupErr = setupKafkaServer(t)
-				if kafkaSetupErr != nil || kafkaSetup == nil {
-					t.Fatalf("could not setup kafka: %s", kafkaSetupErr.Error())
-					return
-				}
-
-				kafkaClient = kafkaSetup.Client
-				kafkaAdminClient = kadm.NewClient(kafkaClient)
-
-				cfg.KafkaSeeds = kafkaSetup.Brokers
-			}()
-		}
-	}
-
-	if cfg.EnableNats {
-		natsStarted.Add(1)
-		go func() {
-			defer natsStarted.Done()
-			var natsErr error
-			natsSetup, natsErr = setupNatsServers(t)
-			if natsErr != nil {
-				t.Fatalf("could not setup nats: %s", natsErr.Error())
-			}
-		}()
 	}
 
 	if cfg.AssertCacheMetrics != nil {
@@ -597,11 +525,6 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 		cfg.ModifyRouterConfig(&routerConfig)
 	}
 
-	cdnServer := cfg.CdnSever
-	if cfg.CdnSever == nil {
-		cdnServer = SetupCDNServer(t, freeport.GetOne(t))
-	}
-
 	if cfg.PrometheusRegistry != nil {
 		cfg.PrometheusPort = ports[0]
 	}
@@ -623,7 +546,7 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 
 	kafkaStarted.Wait()
 
-	rr, err := configureRouter(listenerAddr, cfg, &routerConfig, cdnServer, natsSetup)
+	rr, err := configureRouter(listenerAddr, cfg, &routerConfig, natsSetup)
 	if err != nil {
 		return nil, err
 	}
@@ -720,7 +643,6 @@ func createTestEnv(t testing.TB, cfg *Config) (*Environment, error) {
 		Router:                  rr,
 		RouterURL:               rr.BaseURL(),
 		RouterClient:            client,
-		CDN:                     cdnServer,
 		NatsData:                natsSetup,
 		SubgraphRequestCount:    counters,
 		KafkaAdminClient:        kafkaAdminClient,
@@ -772,13 +694,8 @@ func GenerateVersionedJwtToken() (string, error) {
 	return jwtToken.SignedString([]byte("hunter2"))
 }
 
-func configureRouter(listenerAddr string, testConfig *Config, routerConfig *nodev1.RouterConfig, cdn *httptest.Server, natsData *NatsData) (*core.Router, error) {
+func configureRouter(listenerAddr string, testConfig *Config, routerConfig *nodev1.RouterConfig, natsData *NatsData) (*core.Router, error) {
 	cfg := config.Config{
-		Graph: config.Graph{},
-		CDN: config.CDNConfiguration{
-			URL:       cdn.URL,
-			CacheSize: 1024 * 1024,
-		},
 		SubgraphErrorPropagation: config.SubgraphErrorPropagationConfiguration{
 			Enabled:                true,
 			PropagateStatusCodes:   true,
@@ -788,52 +705,31 @@ func configureRouter(listenerAddr string, testConfig *Config, routerConfig *node
 			RewritePaths:           true,
 			AllowedExtensionFields: []string{"code"},
 		},
-		CacheControl:              testConfig.CacheControlPolicy,
-		AutomaticPersistedQueries: testConfig.ApqConfig,
+		CacheControl: testConfig.CacheControlPolicy,
 	}
-
-	if testConfig.ModifyCDNConfig != nil {
-		testConfig.ModifyCDNConfig(&cfg.CDN)
-	}
-
-	graphApiToken, err := generateJwtToken()
-	if testConfig.UseVersionedGraph {
-		graphApiToken, err = GenerateVersionedJwtToken()
-	}
-	if err != nil {
-		return nil, err
-	}
-
 	engineExecutionConfig := config.EngineExecutionConfiguration{
 		EnableNetPoll:                          true,
 		EnableSingleFlight:                     true,
-		EnableRequestTracing:                   true,
 		EnableExecutionPlanCacheResponseHeader: true,
 		EnableNormalizationCache:               true,
 		NormalizationCacheSize:                 1024,
 		Debug: config.EngineDebugConfiguration{
-			ReportWebSocketConnections:                   true,
-			PrintQueryPlans:                              false,
-			EnablePersistedOperationsCacheResponseHeader: true,
-			EnableNormalizationCacheResponseHeader:       true,
+			ReportWebSocketConnections:             true,
+			PrintQueryPlans:                        false,
+			EnableNormalizationCacheResponseHeader: true,
 		},
-		WebSocketClientPollTimeout:     300 * time.Millisecond,
-		WebSocketClientConnBufferSize:  1,
-		WebSocketClientReadTimeout:     100 * time.Millisecond,
-		MaxConcurrentResolvers:         32,
-		ExecutionPlanCacheSize:         1024,
-		EnablePersistedOperationsCache: true,
-		OperationHashCacheSize:         2048,
-		ParseKitPoolSize:               8,
-		EnableValidationCache:          true,
-		ValidationCacheSize:            1024,
+		WebSocketClientPollTimeout:    300 * time.Millisecond,
+		WebSocketClientConnBufferSize: 1,
+		WebSocketClientReadTimeout:    100 * time.Millisecond,
+		MaxConcurrentResolvers:        32,
+		ExecutionPlanCacheSize:        1024,
+		OperationHashCacheSize:        2048,
+		ParseKitPoolSize:              8,
+		EnableValidationCache:         true,
+		ValidationCacheSize:           1024,
 	}
 	if testConfig.ModifyEngineExecutionConfiguration != nil {
 		testConfig.ModifyEngineExecutionConfiguration(&engineExecutionConfig)
-	}
-
-	if testConfig.ModifySecurityConfiguration != nil {
-		testConfig.ModifySecurityConfiguration(&cfg.SecurityConfiguration)
 	}
 
 	if testConfig.ModifySubgraphErrorPropagation != nil {
@@ -876,15 +772,11 @@ func configureRouter(listenerAddr string, testConfig *Config, routerConfig *node
 			SubgraphEnabled:    testConfig.SubgraphAccessLogsEnabled,
 			SubgraphAttributes: testConfig.SubgraphAccessLogFields,
 		}),
-		core.WithGraphApiToken(graphApiToken),
 		core.WithDevelopmentMode(true),
 		core.WithPlayground(true),
 		core.WithPlaygroundConfig(config.PlaygroundConfig{Enabled: true}),
 		core.WithEngineExecutionConfig(engineExecutionConfig),
-		core.WithSecurityConfig(cfg.SecurityConfiguration),
 		core.WithCacheControlPolicy(cfg.CacheControl),
-		core.WithAutomatedPersistedQueriesConfig(cfg.AutomaticPersistedQueries),
-		core.WithCDN(cfg.CDN),
 		core.WithListenerAddr(listenerAddr),
 		core.WithSubgraphErrorPropagation(cfg.SubgraphErrorPropagation),
 		core.WithTLSConfig(testConfig.TLSConfig),
@@ -899,8 +791,6 @@ func configureRouter(listenerAddr string, testConfig *Config, routerConfig *node
 	if testConfig.RouterConfig != nil {
 		if testConfig.RouterConfig.StaticConfig != nil {
 			routerOpts = append(routerOpts, core.WithStaticExecutionConfig(testConfig.RouterConfig.StaticConfig))
-		} else if testConfig.RouterConfig.ConfigPollerFactory != nil {
-			routerOpts = append(routerOpts, core.WithConfigPoller(testConfig.RouterConfig.ConfigPollerFactory(routerConfig)))
 		} else {
 			return nil, errors.New("router config is nil")
 		}
@@ -1111,26 +1001,19 @@ func gqlURL(srv *httptest.Server) string {
 }
 
 type Environment struct {
-	t                     testing.TB
-	cfg                   *Config
-	graphQLPath           string
-	absinthePath          string
-	shutdown              *atomic.Bool
-	Context               context.Context
-	cancel                context.CancelCauseFunc
-	Router                *core.Router
-	RouterURL             string
-	RouterClient          *http.Client
-	Servers               []*httptest.Server
-	CDN                   *httptest.Server
-	NatsData              *NatsData
-	NatsConnectionDefault *nats.Conn
-	NatsConnectionMyNats  *nats.Conn
-	SubgraphRequestCount  *SubgraphRequestCount
-	KafkaAdminClient      *kadm.Client
-	KafkaClient           *kgo.Client
-	logObserver           *observer.ObservedLogs
-	getPubSubName         func(name string) string
+	t                    testing.TB
+	cfg                  *Config
+	graphQLPath          string
+	absinthePath         string
+	shutdown             *atomic.Bool
+	Context              context.Context
+	cancel               context.CancelCauseFunc
+	Router               *core.Router
+	RouterURL            string
+	RouterClient         *http.Client
+	Servers              []*httptest.Server
+	SubgraphRequestCount *SubgraphRequestCount
+	logObserver          *observer.ObservedLogs
 
 	shutdownDelay       time.Duration
 	extraURLQueryValues url.Values
@@ -1146,12 +1029,6 @@ func GetPubSubNameFn(prefix string) func(name string) string {
 	return func(name string) string {
 		return prefix + name
 	}
-}
-
-// GetPubSubName returns the name of a PubSub entity (subject, topic, subscription, etc.) unique for this test environment.
-// Using this method avoid conflicts between tests running in parallel.
-func (e *Environment) GetPubSubName(name string) string {
-	return e.getPubSubName(name)
 }
 
 func (e *Environment) RouterConfigVersionMain() string {
@@ -1208,29 +1085,6 @@ func (e *Environment) Shutdown() {
 		if lErr != nil {
 			e.t.Logf("could not close server listener: %s", lErr)
 		}
-	}
-
-	// Close the CDN
-	e.CDN.CloseClientConnections()
-	// Do not call s.Close() here, as it will get stuck on connections left open!
-	lErr := e.CDN.Listener.Close()
-	if lErr != nil {
-		e.t.Logf("could not close CDN listener: %s", lErr)
-	}
-
-	// Flush NATS connections
-	if e.cfg.EnableNats {
-		if e.NatsConnectionMyNats != nil {
-			e.NatsConnectionMyNats.Flush()
-		}
-		if e.NatsConnectionDefault != nil {
-			e.NatsConnectionDefault.Flush()
-		}
-	}
-
-	// Flush Kafka connection
-	if e.cfg.EnableKafka && e.KafkaClient != nil {
-		e.KafkaClient.Flush(ctx)
 	}
 
 	if e.routerCmd != nil {

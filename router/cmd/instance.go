@@ -3,16 +3,13 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"net/http"
+	"github.com/dustin/go-humanize"
 	"os"
 
 	"github.com/KimMachineGun/automemlimit/memlimit"
-	"github.com/dustin/go-humanize"
 	"github.com/wundergraph/cosmo/router/core"
 	"github.com/wundergraph/cosmo/router/pkg/authentication"
 	"github.com/wundergraph/cosmo/router/pkg/config"
-	"github.com/wundergraph/cosmo/router/pkg/controlplane/selfregister"
-	"github.com/wundergraph/cosmo/router/pkg/cors"
 	"github.com/wundergraph/cosmo/router/pkg/logging"
 	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
@@ -62,18 +59,12 @@ func NewRouter(ctx context.Context, params Params, additionalOptions ...core.Opt
 
 	options := []core.Option{
 		core.WithListenerAddr(cfg.ListenAddr),
-		core.WithOverrideRoutingURL(cfg.OverrideRoutingURL),
-		core.WithOverrides(cfg.Overrides),
 		core.WithLogger(logger),
 		core.WithIntrospection(cfg.IntrospectionEnabled),
 		core.WithQueryPlans(cfg.QueryPlansEnabled),
 		core.WithPlayground(cfg.PlaygroundEnabled),
-		core.WithGraphApiToken(cfg.Graph.Token),
-		core.WithPersistedOperationsConfig(cfg.PersistedOperationsConfig),
-		core.WithAutomatedPersistedQueriesConfig(cfg.AutomaticPersistedQueries),
 		core.WithApolloCompatibilityFlagsConfig(cfg.ApolloCompatibilityFlags),
 		core.WithApolloRouterCompatibilityFlags(cfg.ApolloRouterCompatibilityFlags),
-		core.WithStorageProviders(cfg.StorageProviders),
 		core.WithGraphQLPath(cfg.GraphQLPath),
 		core.WithModulesConfig(cfg.Modules),
 		core.WithGracePeriod(cfg.GracePeriod),
@@ -81,20 +72,11 @@ func NewRouter(ctx context.Context, params Params, additionalOptions ...core.Opt
 		core.WithPlaygroundPath(cfg.PlaygroundPath),
 		core.WithHealthCheckPath(cfg.HealthCheckPath),
 		core.WithLivenessCheckPath(cfg.LivenessCheckPath),
-		core.WithGraphQLMetrics(&core.GraphQLMetricsConfig{
-			Enabled:           cfg.GraphqlMetrics.Enabled,
-			CollectorEndpoint: cfg.GraphqlMetrics.CollectorEndpoint,
-		}),
-		core.WithAnonymization(&core.IPAnonymizationConfig{
-			Enabled: cfg.Compliance.AnonymizeIP.Enabled,
-			Method:  core.IPAnonymizationMethod(cfg.Compliance.AnonymizeIP.Method),
-		}),
+		core.WithReadinessCheckPath(cfg.ReadinessCheckPath),
 		core.WithClusterName(cfg.Cluster.Name),
 		core.WithInstanceID(cfg.InstanceID),
-		core.WithReadinessCheckPath(cfg.ReadinessCheckPath),
 		core.WithHeaderRules(cfg.Headers),
 		core.WithRouterTrafficConfig(&cfg.TrafficShaping.Router),
-		core.WithFileUploadConfig(&cfg.FileUpload),
 		core.WithSubgraphTransportOptions(core.NewSubgraphTransportOptions(cfg.TrafficShaping)),
 		core.WithSubgraphRetryOptions(
 			cfg.TrafficShaping.All.BackoffJitterRetry.Enabled,
@@ -102,14 +84,6 @@ func NewRouter(ctx context.Context, params Params, additionalOptions ...core.Opt
 			cfg.TrafficShaping.All.BackoffJitterRetry.MaxDuration,
 			cfg.TrafficShaping.All.BackoffJitterRetry.Interval,
 		),
-		core.WithCors(&cors.Config{
-			Enabled:          cfg.CORS.Enabled,
-			AllowOrigins:     cfg.CORS.AllowOrigins,
-			AllowMethods:     cfg.CORS.AllowMethods,
-			AllowCredentials: cfg.CORS.AllowCredentials,
-			AllowHeaders:     cfg.CORS.AllowHeaders,
-			MaxAge:           cfg.CORS.MaxAge,
-		}),
 		core.WithTLSConfig(&core.TlsConfig{
 			Enabled:  cfg.TLS.Server.Enabled,
 			CertFile: cfg.TLS.Server.CertFile,
@@ -120,26 +94,12 @@ func NewRouter(ctx context.Context, params Params, additionalOptions ...core.Opt
 			},
 		}),
 		core.WithDevelopmentMode(cfg.DevelopmentMode),
-		core.WithTracing(core.TraceConfigFromTelemetry(&cfg.Telemetry)),
-		core.WithMetrics(core.MetricConfigFromTelemetry(&cfg.Telemetry)),
-		core.WithTelemetryAttributes(cfg.Telemetry.Attributes),
 		core.WithEngineExecutionConfig(cfg.EngineExecutionConfiguration),
 		core.WithCacheControlPolicy(cfg.CacheControl),
-		core.WithSecurityConfig(cfg.SecurityConfiguration),
 		core.WithAuthorizationConfig(&cfg.Authorization),
 		core.WithWebSocketConfiguration(&cfg.WebSocket),
 		core.WithSubgraphErrorPropagation(cfg.SubgraphErrorPropagation),
-		core.WithLocalhostFallbackInsideDocker(cfg.LocalhostFallbackInsideDocker),
-		core.WithCDN(cfg.CDN),
-		core.WithEvents(cfg.Events),
-		core.WithRateLimitConfig(&cfg.RateLimit),
 		core.WithClientHeader(cfg.ClientHeader),
-		core.WithCacheWarmupConfig(&cfg.CacheWarmup),
-	}
-
-	// HTTP_PROXY, HTTPS_PROXY and NO_PROXY
-	if hasProxyConfigured() {
-		core.WithProxy(http.ProxyFromEnvironment)
 	}
 
 	options = append(options, additionalOptions...)
@@ -194,35 +154,18 @@ func NewRouter(ctx context.Context, params Params, additionalOptions ...core.Opt
 		options = append(options, core.WithAccessLogs(c))
 	}
 
-	if cfg.RouterRegistration && cfg.Graph.Token != "" {
-		selfRegister, err := selfregister.New(cfg.ControlplaneURL, cfg.Graph.Token,
-			selfregister.WithLogger(logger),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("could not create self register: %w", err)
-		}
-		options = append(options, core.WithSelfRegistration(selfRegister))
-	}
-
 	executionConfigPath := cfg.ExecutionConfig.File.Path
 	if executionConfigPath == "" {
 		executionConfigPath = cfg.RouterConfigPath
 	}
 
-	if executionConfigPath != "" {
-		options = append(options, core.WithExecutionConfig(&core.ExecutionConfig{
-			Watch:         cfg.ExecutionConfig.File.Watch,
-			WatchInterval: cfg.ExecutionConfig.File.WatchInterval,
-			Path:          executionConfigPath,
-		}))
-	} else {
-		options = append(options, core.WithConfigPollerConfig(&core.RouterConfigPollerConfig{
-			GraphSignKey:    cfg.Graph.SignKey,
-			PollInterval:    cfg.PollInterval,
-			PollJitter:      cfg.PollJitter,
-			ExecutionConfig: cfg.ExecutionConfig,
-		}))
+	if executionConfigPath == "" {
+		return nil, fmt.Errorf("config file path should be specified")
 	}
+
+	options = append(options, core.WithExecutionConfig(&core.ExecutionConfig{
+		Path: executionConfigPath,
+	}))
 
 	if len(authenticators) > 0 {
 		options = append(options, core.WithAccessController(core.NewAccessController(authenticators, cfg.Authorization.RequireAuthentication)))
@@ -308,11 +251,4 @@ func setupAuthenticators(ctx context.Context, logger *zap.Logger, cfg *config.Co
 	}
 
 	return authenticators, nil
-}
-
-func hasProxyConfigured() bool {
-	_, httpProxy := os.LookupEnv("HTTP_PROXY")
-	_, httpsProxy := os.LookupEnv("HTTPS_PROXY")
-	_, noProxy := os.LookupEnv("NO_PROXY")
-	return httpProxy || httpsProxy || noProxy
 }

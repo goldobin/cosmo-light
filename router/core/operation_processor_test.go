@@ -1,7 +1,6 @@
 package core
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -10,67 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/plan"
 )
-
-func TestOperationProcessorPersistentOperations(t *testing.T) {
-	executor := &Executor{
-		PlanConfig:      plan.Configuration{},
-		RouterSchema:    nil,
-		Resolver:        nil,
-		RenameTypeNames: nil,
-	}
-	parser := NewOperationProcessor(OperationProcessorOptions{
-		Executor:                executor,
-		MaxOperationSizeInBytes: 10 << 20,
-		ParseKitPoolSize:        4,
-	})
-	clientInfo := &ClientInfo{
-		Name:    "test",
-		Version: "1.0.0",
-	}
-	testCases := []struct {
-		ExpectedType  string
-		ExpectedError error
-		Input         string
-		Variables     string
-	}{
-		/**
-		 * Test cases persist operation
-		 */
-		{
-			Input:         `{"operationName": "test", "variables": {"foo": "bar"}, "extensions": {"persistedQuery": {"version": 1, "sha256Hash": "does-not-exist"}}}`,
-			Variables:     `{"foo": "bar"}`,
-			ExpectedError: errors.New("could not resolve persisted query, feature is not configured"),
-		},
-	}
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.Input, func(t *testing.T) {
-			kit, err := parser.NewKit()
-			require.NoError(t, err)
-			defer kit.Free()
-
-			err = kit.UnmarshalOperationFromBody([]byte(tc.Input))
-			if err != nil {
-				require.NoError(t, err)
-			}
-
-			require.NoError(t, err)
-
-			var isApq bool
-			_, isApq, err = kit.FetchPersistedOperation(context.Background(), clientInfo)
-
-			require.False(t, isApq)
-			if err != nil {
-				require.EqualError(t, tc.ExpectedError, err.Error())
-			} else if kit.parsedOperation != nil {
-				require.Equal(t, tc.ExpectedType, kit.parsedOperation.Type)
-				require.JSONEq(t, tc.Variables, string(kit.parsedOperation.Request.Variables))
-				require.Equal(t, uint64(0), kit.parsedOperation.ID)
-				require.Equal(t, "", kit.parsedOperation.NormalizedRepresentation)
-			}
-		})
-	}
-}
 
 func TestParseOperationProcessor(t *testing.T) {
 	executor := &Executor{
@@ -209,74 +147,6 @@ func TestParseOperationProcessor(t *testing.T) {
 				require.JSONEq(t, tc.Variables, string(kit.parsedOperation.Request.Variables))
 				require.Equal(t, uint64(0), kit.parsedOperation.ID)
 				require.Equal(t, "", kit.parsedOperation.NormalizedRepresentation)
-			}
-		})
-	}
-}
-
-func TestOperationProcessorUnmarshalExtensions(t *testing.T) {
-	executor := &Executor{
-		PlanConfig:      plan.Configuration{},
-		RouterSchema:    nil,
-		Resolver:        nil,
-		RenameTypeNames: nil,
-	}
-	parser := NewOperationProcessor(OperationProcessorOptions{
-		Executor:                executor,
-		MaxOperationSizeInBytes: 10 << 20,
-		ParseKitPoolSize:        4,
-	})
-	testCases := []struct {
-		Input     string
-		HttpError bool
-		Valid     bool
-	}{
-		{
-			Input:     `{"query":"subscription { initialPayload(repeat:3) }","extensions":"this_is_not_valid"}`,
-			HttpError: true,
-		},
-		{
-			Input:     `{"query":"subscription { initialPayload(repeat:3) }","extensions":42}`,
-			HttpError: true,
-		},
-		{
-			Input:     `{"query":"subscription { initialPayload(repeat:3) }","extensions":true}`,
-			HttpError: true,
-		},
-		{
-			Input: `{"query":"subscription { initialPayload(repeat:3) }","extensions":{"foo":bar}}`,
-			Valid: false,
-		},
-		{
-			Input: `{"query":"subscription { initialPayload(repeat:3) }","extensions":{}}`,
-			Valid: true,
-		},
-		{
-			Input: `{"query":"subscription { initialPayload(repeat:3) }","extensions":null}`,
-			Valid: true,
-		},
-		{
-			Input: `{"query":"subscription { initialPayload(repeat:3) }"}`,
-			Valid: true,
-		},
-	}
-	var inputError HttpError
-	for _, tc := range testCases {
-		tc := tc
-		t.Run(tc.Input, func(t *testing.T) {
-
-			kit, err := parser.NewKit()
-			require.NoError(t, err)
-			defer kit.Free()
-
-			err = kit.UnmarshalOperationFromBody([]byte(tc.Input))
-
-			if tc.Valid {
-				assert.NoError(t, err)
-			} else if tc.HttpError {
-				assert.True(t, errors.As(err, &inputError), "expected invalid extensions to return an http error, got %s", err)
-			} else {
-				assert.Error(t, err)
 			}
 		})
 	}

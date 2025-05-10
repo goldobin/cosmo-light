@@ -13,7 +13,7 @@ type SubgraphTransport struct {
 	opts             *SubgraphTransportOptions
 }
 
-func NewSubgraphTransport(transportOpts *SubgraphTransportOptions, roundTripper http.RoundTripper, logger *zap.Logger, proxy ProxyFunc) *SubgraphTransport {
+func NewSubgraphTransport(transportOpts *SubgraphTransportOptions, roundTripper http.RoundTripper, logger *zap.Logger) *SubgraphTransport {
 	tt := &SubgraphTransport{
 		defaultTransport: roundTripper,
 		logger:           logger,
@@ -23,7 +23,7 @@ func NewSubgraphTransport(transportOpts *SubgraphTransportOptions, roundTripper 
 
 	for subgraph, subgraphOpts := range transportOpts.SubgraphMap {
 		if subgraphOpts != nil {
-			tt.subgraphTrippers[subgraph] = newHTTPTransport(subgraphOpts, proxy)
+			tt.subgraphTrippers[subgraph] = newHTTPTransport(subgraphOpts)
 		}
 	}
 

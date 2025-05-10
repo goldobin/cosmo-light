@@ -20,7 +20,6 @@ import (
 	"github.com/gobwas/ws/wsutil"
 	"github.com/gorilla/websocket"
 	"github.com/tidwall/gjson"
-	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/semaphore"
@@ -37,7 +36,6 @@ import (
 	"github.com/wundergraph/cosmo/router/pkg/config"
 	"github.com/wundergraph/cosmo/router/pkg/logging"
 	"github.com/wundergraph/cosmo/router/pkg/statistics"
-	rtrace "github.com/wundergraph/cosmo/router/pkg/trace"
 )
 
 var (
@@ -46,11 +44,9 @@ var (
 
 type WebsocketMiddlewareOptions struct {
 	OperationProcessor *OperationProcessor
-	OperationBlocker   *OperationBlocker
 	Planner            *OperationPlanner
 	GraphQLHandler     *GraphQLHandler
 	PreHandler         *PreHandler
-	Metrics            RouterMetrics
 	AccessController   *AccessController
 	Logger             *zap.Logger
 	Stats              statistics.EngineStatistics
@@ -62,7 +58,6 @@ type WebsocketMiddlewareOptions struct {
 
 	WebSocketConfiguration *config.WebSocketConfiguration
 	ClientHeader           config.ClientHeader
-	Attributes             []attribute.KeyValue
 
 	DisableVariablesRemapping bool
 
@@ -74,11 +69,9 @@ func NewWebsocketMiddleware(ctx context.Context, opts WebsocketMiddlewareOptions
 	handler := &WebsocketHandler{
 		ctx:                       ctx,
 		operationProcessor:        opts.OperationProcessor,
-		operationBlocker:          opts.OperationBlocker,
 		planner:                   opts.Planner,
 		graphqlHandler:            opts.GraphQLHandler,
 		preHandler:                opts.PreHandler,
-		metrics:                   opts.Metrics,
 		accessController:          opts.AccessController,
 		logger:                    opts.Logger,
 		stats:                     opts.Stats,
@@ -86,7 +79,6 @@ func NewWebsocketMiddleware(ctx context.Context, opts WebsocketMiddlewareOptions
 		config:                    opts.WebSocketConfiguration,
 		clientHeader:              opts.ClientHeader,
 		handlerSem:                semaphore.NewWeighted(128),
-		attributes:                opts.Attributes,
 		disableVariablesRemapping: opts.DisableVariablesRemapping,
 		apolloCompatibilityFlags:  opts.ApolloCompatibilityFlags,
 	}
@@ -199,11 +191,9 @@ type WebsocketHandler struct {
 	ctx                context.Context
 	config             *config.WebSocketConfiguration
 	operationProcessor *OperationProcessor
-	operationBlocker   *OperationBlocker
 	planner            *OperationPlanner
 	graphqlHandler     *GraphQLHandler
 	preHandler         *PreHandler
-	metrics            RouterMetrics
 	accessController   *AccessController
 	logger             *zap.Logger
 
@@ -214,8 +204,7 @@ type WebsocketHandler struct {
 	handlerSem    *semaphore.Weighted
 	connectionIDs atomic.Int64
 
-	stats      statistics.EngineStatistics
-	attributes []attribute.KeyValue
+	stats statistics.EngineStatistics
 
 	readTimeout time.Duration
 
@@ -238,9 +227,7 @@ func (h *WebsocketHandler) handleUpgradeRequest(w http.ResponseWriter, r *http.R
 
 	requestID := middleware.GetReqID(r.Context())
 	requestContext := getRequestContext(r.Context())
-
-	requestLogger := h.logger.With(logging.WithRequestID(requestID), logging.WithTraceID(rtrace.GetTraceID(r.Context())))
-	clientInfo := NewClientInfoFromRequest(r, h.clientHeader)
+	requestLogger := h.logger.With(logging.WithRequestID(requestID))
 
 	if h.accessController != nil && !h.config.Authentication.FromInitialPayload.Enabled {
 		// Check access control before upgrading the connection
@@ -295,7 +282,7 @@ func (h *WebsocketHandler) handleUpgradeRequest(w http.ResponseWriter, r *http.R
 	// We can parse the request options before creating the handler
 	// this avoids touching the client request across goroutines
 
-	executionOptions, traceOptions, err := h.preHandler.parseRequestOptions(r, clientInfo, requestLogger)
+	executionOptions, traceOptions, err := h.preHandler.parseRequestOptions()
 	if err != nil {
 		requestLogger.Error("Parse request options", zap.Error(err))
 		_ = c.Close()
@@ -303,19 +290,15 @@ func (h *WebsocketHandler) handleUpgradeRequest(w http.ResponseWriter, r *http.R
 	}
 
 	planOptions := PlanOptions{
-		ClientInfo:           clientInfo,
-		TraceOptions:         traceOptions,
-		ExecutionOptions:     executionOptions,
-		TrackSchemaUsageInfo: h.preHandler.trackSchemaUsageInfo,
+		TraceOptions:     traceOptions,
+		ExecutionOptions: executionOptions,
 	}
 
 	handler := NewWebsocketConnectionHandler(h.ctx, WebSocketConnectionHandlerOptions{
 		OperationProcessor:        h.operationProcessor,
-		OperationBlocker:          h.operationBlocker,
 		Planner:                   h.planner,
 		GraphQLHandler:            h.graphqlHandler,
 		PreHandler:                h.preHandler,
-		Metrics:                   h.metrics,
 		PlanOptions:               planOptions,
 		ResponseWriter:            w,
 		Request:                   r,
@@ -324,12 +307,10 @@ func (h *WebsocketHandler) handleUpgradeRequest(w http.ResponseWriter, r *http.R
 		Logger:                    requestLogger,
 		Stats:                     h.stats,
 		ConnectionID:              h.connectionIDs.Inc(),
-		ClientInfo:                clientInfo,
 		InitRequestID:             requestID,
 		Config:                    h.config,
 		ForwardUpgradeHeaders:     h.forwardUpgradeHeadersConfig,
 		ForwardQueryParams:        h.forwardQueryParamsConfig,
-		Attributes:                h.attributes,
 		DisableVariablesRemapping: h.disableVariablesRemapping,
 		ApolloCompatibilityFlags:  h.apolloCompatibilityFlags,
 	})
@@ -652,11 +633,9 @@ type graphqlError struct {
 type WebSocketConnectionHandlerOptions struct {
 	Config                    *config.WebSocketConfiguration
 	OperationProcessor        *OperationProcessor
-	OperationBlocker          *OperationBlocker
 	Planner                   *OperationPlanner
 	GraphQLHandler            *GraphQLHandler
 	PreHandler                *PreHandler
-	Metrics                   RouterMetrics
 	ResponseWriter            http.ResponseWriter
 	Request                   *http.Request
 	Connection                *wsConnectionWrapper
@@ -665,11 +644,9 @@ type WebSocketConnectionHandlerOptions struct {
 	Stats                     statistics.EngineStatistics
 	PlanOptions               PlanOptions
 	ConnectionID              int64
-	ClientInfo                *ClientInfo
 	InitRequestID             string
 	ForwardUpgradeHeaders     forwardConfig
 	ForwardQueryParams        forwardConfig
-	Attributes                []attribute.KeyValue
 	DisableVariablesRemapping bool
 	ApolloCompatibilityFlags  config.ApolloCompatibilityFlags
 }
@@ -677,20 +654,17 @@ type WebSocketConnectionHandlerOptions struct {
 type WebSocketConnectionHandler struct {
 	ctx                context.Context
 	operationProcessor *OperationProcessor
-	operationBlocker   *OperationBlocker
 	planner            *OperationPlanner
 	graphqlHandler     *GraphQLHandler
 	plannerOptions     PlanOptions
 	preHandler         *PreHandler
-	metrics            RouterMetrics
 	w                  http.ResponseWriter
 	// request is the original client request. It is not safe for concurrent use.
 	// You have to clone it before using it in a goroutine.
-	request    *http.Request
-	conn       *wsConnectionWrapper
-	protocol   wsproto.Proto
-	clientInfo *ClientInfo
-	logger     *zap.Logger
+	request  *http.Request
+	conn     *wsConnectionWrapper
+	protocol wsproto.Proto
+	logger   *zap.Logger
 
 	initialPayload            json.RawMessage
 	upgradeRequestHeaders     json.RawMessage
@@ -702,10 +676,7 @@ type WebSocketConnectionHandler struct {
 	subscriptions   sync.Map
 	stats           statistics.EngineStatistics
 
-	attributes []attribute.KeyValue
-
 	forwardInitialPayload bool
-
 	forwardUpgradeHeaders *forwardConfig
 	forwardQueryParams    *forwardConfig
 
@@ -731,11 +702,9 @@ func NewWebsocketConnectionHandler(ctx context.Context, opts WebSocketConnection
 	return &WebSocketConnectionHandler{
 		ctx:                       ctx,
 		operationProcessor:        opts.OperationProcessor,
-		operationBlocker:          opts.OperationBlocker,
 		planner:                   opts.Planner,
 		graphqlHandler:            opts.GraphQLHandler,
 		preHandler:                opts.PreHandler,
-		metrics:                   opts.Metrics,
 		w:                         opts.ResponseWriter,
 		request:                   opts.Request,
 		conn:                      opts.Connection,
@@ -743,13 +712,11 @@ func NewWebsocketConnectionHandler(ctx context.Context, opts WebSocketConnection
 		logger:                    opts.Logger,
 		connectionID:              opts.ConnectionID,
 		stats:                     opts.Stats,
-		clientInfo:                opts.ClientInfo,
 		initRequestID:             opts.InitRequestID,
 		forwardUpgradeHeaders:     &opts.ForwardUpgradeHeaders,
 		forwardQueryParams:        &opts.ForwardQueryParams,
 		forwardInitialPayload:     opts.Config != nil && opts.Config.ForwardInitialPayload,
 		plannerOptions:            opts.PlanOptions,
-		attributes:                opts.Attributes,
 		disableVariablesRemapping: opts.DisableVariablesRemapping,
 		apolloCompatibilityFlags:  opts.ApolloCompatibilityFlags,
 	}
@@ -793,29 +760,12 @@ func (h *WebSocketConnectionHandler) parseAndPlan(registration *SubscriptionRegi
 
 	opContext.extensions = operationKit.parsedOperation.Request.Extensions
 
-	var (
-		skipParse bool
-		isApq     bool
-	)
-
-	if operationKit.parsedOperation.IsPersistedOperation {
-		skipParse, isApq, err = operationKit.FetchPersistedOperation(h.ctx, h.clientInfo)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-
-	// If the persistent operation is already in the cache, we skip the parse step
-	// because the operation was already parsed. This is a performance optimization, and we
-	// can do it because we know that the persisted operation is immutable (identified by the hash)
-	if !skipParse {
-		startParsing := time.Now()
-		if err := operationKit.Parse(); err != nil {
-			opContext.parsingTime = time.Since(startParsing)
-			return nil, nil, err
-		}
+	startParsing := time.Now()
+	if err := operationKit.Parse(); err != nil {
 		opContext.parsingTime = time.Since(startParsing)
+		return nil, nil, err
 	}
+	opContext.parsingTime = time.Since(startParsing)
 
 	opContext.name = operationKit.parsedOperation.Request.OperationName
 	opContext.opType = operationKit.parsedOperation.Type
@@ -825,13 +775,9 @@ func (h *WebSocketConnectionHandler) parseAndPlan(registration *SubscriptionRegi
 		return nil, nil, fmt.Errorf("request context not found")
 	}
 
-	if blocked := h.operationBlocker.OperationIsBlocked(h.logger, reqCtx.expressionContext, operationKit.parsedOperation); blocked != nil {
-		return nil, nil, blocked
-	}
-
 	startNormalization := time.Now()
 
-	if _, err := operationKit.NormalizeOperation(h.clientInfo.Name, isApq); err != nil {
+	if _, err := operationKit.NormalizeOperation(); err != nil {
 		opContext.normalizationTime = time.Since(startNormalization)
 		return nil, nil, err
 	}
@@ -946,24 +892,16 @@ func (h *WebSocketConnectionHandler) executeSubscription(registration *Subscript
 	}
 
 	reqContext := buildRequestContext(requestContextOptions{
-		operationContext:    operationCtx,
-		requestLogger:       h.logger,
-		metricSetAttributes: nil,
-		w:                   nil,
-		r:                   registration.clientRequest,
+		operationContext: operationCtx,
+		requestLogger:    h.logger,
+		w:                nil,
+		r:                registration.clientRequest,
 	})
 	resolveCtx = resolveCtx.WithContext(withRequestContext(h.ctx, reqContext))
 	if h.graphqlHandler.authorizer != nil {
 		resolveCtx = WithAuthorizationExtension(resolveCtx)
 		resolveCtx.SetAuthorizer(h.graphqlHandler.authorizer)
 	}
-	resolveCtx = h.graphqlHandler.configureRateLimiting(resolveCtx)
-
-	// Put in a closure to evaluate err after defer
-	defer func() {
-		// StatusCode has no meaning here. We set it to 0 but set the error.
-		h.metrics.ExportSchemaUsageInfo(operationCtx, 0, err != nil, false)
-	}()
 
 	switch p := operationCtx.preparedPlan.preparedPlan.(type) {
 	case *plan.SynchronousResponsePlan:

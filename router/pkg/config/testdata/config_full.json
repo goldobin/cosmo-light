@@ -1,109 +1,8 @@
 {
   "Version": "1",
   "InstanceID": "",
-  "Graph": {
-    "Token": "mytoken",
-    "SignKey": ""
-  },
-  "Telemetry": {
-    "ServiceName": "cosmo-router",
-    "Attributes": null,
-    "ResourceAttributes": null,
-    "Tracing": {
-      "Enabled": true,
-      "SamplingRate": 1,
-      "ParentBasedSampler": true,
-      "Exporters": [
-        {
-          "Disabled": false,
-          "Exporter": "http",
-          "Endpoint": "https://my-otel-collector.example.com",
-          "HTTPPath": "/v1/traces",
-          "Headers": {},
-          "BatchTimeout": 10000000000,
-          "ExportTimeout": 30000000000
-        }
-      ],
-      "Propagation": {
-        "TraceContext": true,
-        "Jaeger": false,
-        "B3": false,
-        "Baggage": false,
-        "Datadog": true
-      },
-      "ResponseTraceHeader": {
-        "Enabled": false,
-        "HeaderName": "x-wg-trace-id"
-      },
-      "ExportGraphQLVariables": true,
-      "WithNewRoot": false
-    },
-    "Metrics": {
-      "Attributes": null,
-      "OTLP": {
-        "Enabled": true,
-        "RouterRuntime": true,
-        "GraphqlCache": true,
-        "EngineStats": {
-          "Subscriptions": true
-        },
-        "ExcludeMetrics": null,
-        "ExcludeMetricLabels": null,
-        "Exporters": [
-          {
-            "Disabled": false,
-            "Exporter": "http",
-            "Endpoint": "https://my-otel-collector.example.com",
-            "HTTPPath": "/v1/metrics",
-            "Headers": {},
-            "Temporality": ""
-          }
-        ]
-      },
-      "Prometheus": {
-        "Enabled": true,
-        "Path": "/metrics",
-        "ListenAddr": "127.0.0.1:8088",
-        "GraphqlCache": true,
-        "EngineStats": {
-          "Subscriptions": true
-        },
-        "ExcludeMetrics": null,
-        "ExcludeMetricLabels": null,
-        "ExcludeScopeInfo": true
-      }
-    }
-  },
-  "GraphqlMetrics": {
-    "Enabled": true,
-    "CollectorEndpoint": "https://cosmo-metrics.wundergraph.com"
-  },
-  "CORS": {
-    "Enabled": true,
-    "AllowOrigins": [
-      "*"
-    ],
-    "AllowMethods": [
-      "HEAD",
-      "GET",
-      "POST"
-    ],
-    "AllowHeaders": [
-      "Origin",
-      "Content-Length",
-      "Content-Type"
-    ],
-    "AllowCredentials": true,
-    "MaxAge": 300000000000
-  },
   "Cluster": {
     "Name": "my-cluster"
-  },
-  "Compliance": {
-    "AnonymizeIP": {
-      "Enabled": true,
-      "Method": "redact"
-    }
   },
   "TLS": {
     "Server": {
@@ -283,11 +182,6 @@
       }
     }
   },
-  "FileUpload": {
-    "Enabled": true,
-    "MaxFileSizeBytes": 50000000,
-    "MaxFiles": 10
-  },
   "AccessLogs": {
     "Enabled": true,
     "Buffer": {
@@ -438,118 +332,8 @@
       "Code": "RATE_LIMIT_EXCEEDED"
     }
   },
-  "LocalhostFallbackInsideDocker": true,
-  "CDN": {
-    "URL": "https://cosmo-cdn.wundergraph.com",
-    "CacheSize": 100000000
-  },
   "DevelopmentMode": false,
-  "Events": {
-    "Providers": {
-      "Nats": [
-        {
-          "ID": "default",
-          "URL": "nats://localhost:4222",
-          "Authentication": null
-        },
-        {
-          "ID": "my-nats",
-          "URL": "nats://localhost:4222",
-          "Authentication": {
-            "UserInfo": {
-              "Password": "admin",
-              "Username": "admin"
-            },
-            "Token": null
-          }
-        }
-      ],
-      "Kafka": [
-        {
-          "ID": "my-kafka",
-          "Brokers": [
-            "localhost:9092"
-          ],
-          "Authentication": {
-            "SASLPlain": {
-              "Password": "admin",
-              "Username": "admin"
-            }
-          },
-          "TLS": {
-            "Enabled": true
-          }
-        }
-      ]
-    }
-  },
-  "CacheWarmup": {
-    "Enabled": false,
-    "Source": {
-      "Filesystem": null
-    },
-    "Workers": 8,
-    "ItemsPerSecond": 50,
-    "Timeout": 30000000000
-  },
   "RouterConfigPath": "latest.json",
-  "RouterRegistration": true,
-  "OverrideRoutingURL": {
-    "Subgraphs": {
-      "some-subgraph": "http://router:3002/graphql"
-    }
-  },
-  "Overrides": {
-    "Subgraphs": {
-      "some-subgraph": {
-        "RoutingURL": "http://router:3002/graphql",
-        "SubscriptionURL": "http://router:3002/graphql/ws",
-        "SubscriptionProtocol": "ws",
-        "SubscriptionWebsocketSubprotocol": "graphql-ws"
-      }
-    }
-  },
-  "SecurityConfiguration": {
-    "BlockMutations": {
-      "Enabled": false,
-      "Condition": ""
-    },
-    "BlockSubscriptions": {
-      "Enabled": false,
-      "Condition": ""
-    },
-    "BlockNonPersistedOperations": {
-      "Enabled": false,
-      "Condition": ""
-    },
-    "ComplexityCalculationCache": {
-      "Enabled": true,
-      "CacheSize": 1024
-    },
-    "ComplexityLimits": {
-      "Depth": {
-        "Enabled": true,
-        "Limit": 5,
-        "IgnorePersistedOperations": true
-      },
-      "TotalFields": {
-        "Enabled": true,
-        "Limit": 7,
-        "IgnorePersistedOperations": true
-      },
-      "RootFields": {
-        "Enabled": true,
-        "Limit": 3,
-        "IgnorePersistedOperations": true
-      },
-      "RootFieldAliases": {
-        "Enabled": true,
-        "Limit": 4,
-        "IgnorePersistedOperations": true
-      }
-    },
-    "DepthLimit": null
-  },
   "EngineExecutionConfiguration": {
     "Debug": {
       "PrintOperationTransformations": false,
@@ -564,13 +348,11 @@
       "ReportWebSocketConnections": false,
       "ReportMemoryUsage": false,
       "EnableResolverDebugging": false,
-      "EnablePersistedOperationsCacheResponseHeader": false,
       "EnableNormalizationCacheResponseHeader": false,
       "AlwaysIncludeQueryPlan": false,
       "AlwaysSkipLoader": false
     },
     "EnableSingleFlight": true,
-    "EnableRequestTracing": true,
     "EnableExecutionPlanCacheResponseHeader": false,
     "MaxConcurrentResolvers": 32,
     "EnableNetPoll": true,
@@ -579,7 +361,6 @@
     "WebSocketClientReadTimeout": 5000000000,
     "ExecutionPlanCacheSize": 1024,
     "MinifySubgraphOperations": true,
-    "EnablePersistedOperationsCache": true,
     "EnableNormalizationCache": true,
     "NormalizationCacheSize": 1024,
     "OperationHashCacheSize": 2048,
@@ -635,35 +416,9 @@
     ],
     "AllowedFields": null
   },
-  "StorageProviders": {
-    "S3": [
-      {
-        "ID": "s3",
-        "Endpoint": "localhost:10000",
-        "AccessKey": "Pj6opX3288YukriGCzIr",
-        "SecretKey": "WNMg9X4fzMva18henO6XLX4qRHEArwYdT7Yt84w9",
-        "Bucket": "cosmo",
-        "Region": "us-east-1",
-        "Secure": false
-      }
-    ],
-    "CDN": null,
-    "Redis": [
-      {
-        "ID": "my_redis",
-        "URLs": [
-          "test@localhost:8000",
-          "test2@localhost:8001"
-        ],
-        "ClusterEnabled": false
-      }
-    ]
-  },
   "ExecutionConfig": {
     "File": {
-      "Path": "",
-      "Watch": false,
-      "WatchInterval": 1000000000
+      "Path": ""
     },
     "Storage": {
       "ProviderID": "s3",
@@ -673,30 +428,6 @@
       "Enabled": false,
       "ProviderID": "",
       "ObjectPath": ""
-    }
-  },
-  "PersistedOperationsConfig": {
-    "LogUnknown": true,
-    "Safelist": {
-      "Enabled": true
-    },
-    "Cache": {
-      "Size": 100000000
-    },
-    "Storage": {
-      "ProviderID": "s3",
-      "ObjectPrefix": "5ef73d80-cae4-4d0e-98a7-1e9fa922c1a4/92c25b45-a75b-4954-b8f6-6592a9b203eb/operations/foo"
-    }
-  },
-  "AutomaticPersistedQueries": {
-    "Enabled": true,
-    "Cache": {
-      "Size": 100000000,
-      "TTL": 900
-    },
-    "Storage": {
-      "ProviderID": "redis",
-      "ObjectPrefix": "cosmo_apq"
     }
   },
   "ApolloCompatibilityFlags": {

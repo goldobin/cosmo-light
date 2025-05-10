@@ -4,18 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/wundergraph/cosmo/router/internal/rconf"
 	"net/http"
 	"os"
 
 	log "github.com/jensneuse/abstractlogger"
-	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/ast"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astnormalization"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/astparser"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/asttransform"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/graphql_datasource"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/introspection_datasource"
-	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/pubsub_datasource"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/plan"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/postprocess"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
@@ -136,20 +135,11 @@ func NewPlanGenerator(configFilePath string, logger *zap.Logger, maxDataSourceCo
 	return pg, nil
 }
 
-func NewPlanGeneratorFromConfig(config *nodev1.RouterConfig, logger *zap.Logger, maxDataSourceCollectorsConcurrency uint) (*PlanGenerator, error) {
-	pg := &PlanGenerator{}
-	if err := pg.loadConfiguration(config, logger, maxDataSourceCollectorsConcurrency); err != nil {
-		return nil, err
-	}
-
-	return pg, nil
-}
-
 func (pg *PlanGenerator) GetPlanner() (*Planner, error) {
 	return NewPlanner(pg.planConfiguration, pg.definition)
 }
 
-func (pg *PlanGenerator) buildRouterConfig(configFilePath string) (*nodev1.RouterConfig, error) {
+func (pg *PlanGenerator) buildRouterConfig(configFilePath string) (*rconf.RouterConfig, error) {
 	routerConfig, err := execution_config.FromFile(configFilePath)
 	if err != nil {
 		return nil, err
@@ -158,28 +148,7 @@ func (pg *PlanGenerator) buildRouterConfig(configFilePath string) (*nodev1.Route
 	return routerConfig, nil
 }
 
-func (pg *PlanGenerator) loadConfiguration(routerConfig *nodev1.RouterConfig, logger *zap.Logger, maxDataSourceCollectorsConcurrency uint) error {
-	natSources := map[string]pubsub_datasource.NatsPubSub{}
-	kafkaSources := map[string]pubsub_datasource.KafkaPubSub{}
-	for _, ds := range routerConfig.GetEngineConfig().GetDatasourceConfigurations() {
-		if ds.GetKind() != nodev1.DataSourceKind_PUBSUB || ds.GetCustomEvents() == nil {
-			continue
-		}
-		for _, natConfig := range ds.GetCustomEvents().GetNats() {
-			providerId := natConfig.GetEngineEventConfiguration().GetProviderId()
-			if _, ok := natSources[providerId]; !ok {
-				natSources[providerId] = nil
-			}
-		}
-		for _, kafkaConfig := range ds.GetCustomEvents().GetKafka() {
-			providerId := kafkaConfig.GetEngineEventConfiguration().GetProviderId()
-			if _, ok := kafkaSources[providerId]; !ok {
-				kafkaSources[providerId] = nil
-			}
-		}
-	}
-	pubSubFactory := pubsub_datasource.NewFactory(context.Background(), natSources, kafkaSources)
-
+func (pg *PlanGenerator) loadConfiguration(routerConfig *rconf.RouterConfig, logger *zap.Logger, maxDataSourceCollectorsConcurrency uint) error {
 	var netPollConfig graphql_datasource.NetPollConfiguration
 	netPollConfig.ApplyDefaults()
 
@@ -191,17 +160,16 @@ func (pg *PlanGenerator) loadConfiguration(routerConfig *nodev1.RouterConfig, lo
 		graphql_datasource.WithNetPollConfiguration(netPollConfig),
 	)
 
-	loader := NewLoader(false, &DefaultFactoryResolver{
+	loader := NewLoader(&DefaultFactoryResolver{
 		engineCtx:          context.Background(),
 		httpClient:         http.DefaultClient,
 		streamingClient:    http.DefaultClient,
 		subscriptionClient: subscriptionClient,
 		transportOptions:   &TransportOptions{SubgraphTransportOptions: NewSubgraphTransportOptions(config.TrafficShapingRules{})},
-		pubsub:             pubSubFactory,
 	})
 
 	// this generates the plan configuration using the data source factories from the config package
-	planConfig, err := loader.Load(routerConfig.GetEngineConfig(), routerConfig.GetSubgraphs(), &RouterEngineConfiguration{})
+	planConfig, err := loader.Load(routerConfig.EngineConfig, routerConfig.Subgraphs, &RouterEngineConfiguration{})
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}

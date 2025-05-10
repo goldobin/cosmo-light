@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/expr-lang/expr/vm"
-	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 
 	"github.com/wundergraph/astjson"
@@ -17,11 +16,8 @@ import (
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/httpclient"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
 
-	graphqlmetrics "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/graphqlmetrics/v1"
 	"github.com/wundergraph/cosmo/router/internal/expr"
 	"github.com/wundergraph/cosmo/router/pkg/authentication"
-	"github.com/wundergraph/cosmo/router/pkg/config"
-	ctrace "github.com/wundergraph/cosmo/router/pkg/trace"
 )
 
 type contextKey int
@@ -48,17 +44,6 @@ type ClientInfo struct {
 	Version string
 	// WGRequestToken contains the token to authenticate the request from the platform
 	WGRequestToken string
-}
-
-func NewClientInfoFromRequest(r *http.Request, clientHeader config.ClientHeader) *ClientInfo {
-	clientName := ctrace.GetClientHeader(r.Header, []string{clientHeader.Name, "graphql-client-name", "apollographql-client-name"}, "unknown")
-	clientVersion := ctrace.GetClientHeader(r.Header, []string{clientHeader.Version, "graphql-client-version", "apollographql-client-version"}, "missing")
-	requestToken := r.Header.Get("X-WG-Token")
-	return &ClientInfo{
-		Name:           clientName,
-		Version:        clientVersion,
-		WGRequestToken: requestToken,
-	}
 }
 
 type RequestContext interface {
@@ -136,101 +121,6 @@ type RequestContext interface {
 	SetAuthenticationScopes(scopes []string)
 }
 
-var metricAttrsPool = sync.Pool{
-	New: func() any {
-		v := make([]attribute.KeyValue, 0, 20)
-		return &v
-	},
-}
-
-type requestTelemetryAttributes struct {
-	// traceAttrs are the base attributes for traces only
-	traceAttrs []attribute.KeyValue
-	// metricAttrs are the attributes for metrics only
-	metricAttrs []attribute.KeyValue
-	// metricSetAttrs is map to quickly check if a metric attribute is set and to what key it is remapped
-	metricSetAttrs map[string]string
-	// metricSliceAttrs are the attributes for metrics that are string slices and needs to be exploded for prometheus
-	metricSliceAttrs []attribute.KeyValue
-	// mapper is an attribute mapper for context attributes.
-	// It is used to identify attributes that should not be included by default  but can be included if they are
-	// configured in the custom attributes list. The mapper will potentially filter out attributes or include them.
-	// It will also remap the key if configured.
-	mapper *attributeMapper
-	// traceAttributeExpressions is a map of expressions that can be used to resolve dynamic attributes in traces
-	traceAttributeExpressions *attributeExpressions
-	// metricAttributeExpressions is a map of expressions that can be used to resolve dynamic attributes in metrics
-	metricAttributeExpressions *attributeExpressions
-
-	// metricsEnabled indicates if metrics are enabled. If false, no metrics attributes will be added
-	metricsEnabled bool
-	// traceEnabled indicates if traces are enabled, if false, no trace attributes will be added
-	traceEnabled bool
-}
-
-func (r *requestTelemetryAttributes) AcquireAttributes() *[]attribute.KeyValue {
-	if !r.metricsEnabled && !r.traceEnabled {
-		return &[]attribute.KeyValue{}
-	}
-	return metricAttrsPool.Get().(*[]attribute.KeyValue)
-}
-
-func (r *requestTelemetryAttributes) ReleaseAttributes(attrs *[]attribute.KeyValue) {
-	if !r.metricsEnabled && !r.traceEnabled {
-		return
-	}
-
-	// reset slice
-	*attrs = (*attrs)[:0]
-
-	// If the slice is too big, we don't pool it to avoid holding on to too much memory
-	if cap(*attrs) > 128 {
-		return
-	}
-
-	metricAttrsPool.Put(attrs)
-}
-
-func (r *requestTelemetryAttributes) AddCustomMetricStringSliceAttr(key string, values []string) {
-	if !r.metricsEnabled {
-		return
-	}
-	if remapKey, ok := r.metricSetAttrs[key]; ok && len(values) > 0 {
-		v := attribute.StringSlice(remapKey, values)
-		r.metricSliceAttrs = append(r.metricSliceAttrs, v)
-	}
-}
-
-func (r *requestTelemetryAttributes) addCustomMetricStringAttr(key string, value string) {
-	if !r.metricsEnabled {
-		return
-	}
-	if remapKey, ok := r.metricSetAttrs[key]; ok && value != "" {
-		v := attribute.String(remapKey, value)
-		r.metricAttrs = append(r.metricAttrs, v)
-	}
-}
-
-func (r *requestTelemetryAttributes) addCommonAttribute(vals ...attribute.KeyValue) {
-	r.addMetricAttribute(vals...)
-	r.addCommonTraceAttribute(vals...)
-}
-
-func (r *requestTelemetryAttributes) addCommonTraceAttribute(vals ...attribute.KeyValue) {
-	if !r.traceEnabled {
-		return
-	}
-	r.traceAttrs = append(r.traceAttrs, vals...)
-}
-
-func (r *requestTelemetryAttributes) addMetricAttribute(vals ...attribute.KeyValue) {
-	if !r.metricsEnabled {
-		return
-	}
-
-	r.metricAttrs = append(r.metricAttrs, r.mapper.mapAttributes(vals)...)
-}
-
 // requestContext is the default implementation of RequestContext
 // It is accessible to custom modules in the request lifecycle
 type requestContext struct {
@@ -256,8 +146,6 @@ type requestContext struct {
 	graphQLErrorServices []string
 	// graphQLErrorCodes are the error codes of the GraphQL errors
 	graphQLErrorCodes []string
-	// telemetry are the base telemetry information of the request
-	telemetry *requestTelemetryAttributes
 	// expressionContext is the context that will be provided to a compiled expression in order to retrieve data via dynamic expressions
 	expressionContext expr.Context
 }
@@ -527,14 +415,9 @@ type operationContext struct {
 	persistedID      string
 	// Hash on the original operation
 	sha256Hash string
-	protocol   OperationProtocol
 
 	persistedOperationCacheHit bool
 	normalizationCacheHit      bool
-
-	typeFieldUsageInfo []*graphqlmetrics.TypeFieldUsageInfo
-	argumentUsageInfo  []*graphqlmetrics.ArgumentUsageInfo
-	inputUsageInfo     []*graphqlmetrics.InputUsageInfo
 
 	parsingTime       time.Duration
 	validationTime    time.Duration
@@ -568,10 +451,6 @@ func (o *operationContext) Content() string {
 
 func (o *operationContext) PersistedID() string {
 	return o.persistedID
-}
-
-func (o *operationContext) Protocol() OperationProtocol {
-	return o.protocol
 }
 
 func (o *operationContext) ClientInfo() ClientInfo {
@@ -640,38 +519,23 @@ func subgraphResolverFromContext(ctx context.Context) *SubgraphResolver {
 }
 
 type requestContextOptions struct {
-	operationContext              *operationContext
-	requestLogger                 *zap.Logger
-	metricSetAttributes           map[string]string
-	metricsEnabled                bool
-	traceEnabled                  bool
-	mapper                        *attributeMapper
-	metricAttributeExpressions    *attributeExpressions
-	telemetryAttributeExpressions *attributeExpressions
-	w                             http.ResponseWriter
-	r                             *http.Request
+	operationContext *operationContext
+	requestLogger    *zap.Logger
+	w                http.ResponseWriter
+	r                *http.Request
 }
 
 func buildRequestContext(opts requestContextOptions) *requestContext {
-
 	rootCtx := expr.Context{
 		Request: expr.LoadRequest(opts.r),
 	}
 
 	return &requestContext{
-		logger:         opts.requestLogger,
-		keys:           map[string]any{},
-		responseWriter: opts.w,
-		request:        opts.r,
-		operation:      opts.operationContext,
-		telemetry: &requestTelemetryAttributes{
-			metricSetAttrs:             opts.metricSetAttributes,
-			metricsEnabled:             opts.metricsEnabled,
-			traceEnabled:               opts.traceEnabled,
-			mapper:                     opts.mapper,
-			traceAttributeExpressions:  opts.telemetryAttributeExpressions,
-			metricAttributeExpressions: opts.metricAttributeExpressions,
-		},
+		logger:            opts.requestLogger,
+		keys:              map[string]any{},
+		responseWriter:    opts.w,
+		request:           opts.r,
+		operation:         opts.operationContext,
 		expressionContext: rootCtx,
 		subgraphResolver:  subgraphResolverFromContext(opts.r.Context()),
 	}

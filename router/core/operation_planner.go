@@ -11,23 +11,17 @@ import (
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/plan"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/postprocess"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
-
-	graphqlmetricsv1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/graphqlmetrics/v1"
-	"github.com/wundergraph/cosmo/router/pkg/graphqlschemausage"
 )
 
 type planWithMetaData struct {
 	preparedPlan                      plan.Plan
 	operationDocument, schemaDocument *ast.Document
-	typeFieldUsageInfo                []*graphqlmetricsv1.TypeFieldUsageInfo
-	argumentUsageInfo                 []*graphqlmetricsv1.ArgumentUsageInfo
 }
 
 type OperationPlanner struct {
-	sf             singleflight.Group
-	planCache      ExecutionPlanCache[uint64, *planWithMetaData]
-	executor       *Executor
-	trackUsageInfo bool
+	sf        singleflight.Group
+	planCache ExecutionPlanCache[uint64, *planWithMetaData]
+	executor  *Executor
 }
 
 type ExecutionPlanCache[K any, V any] interface {
@@ -41,9 +35,8 @@ type ExecutionPlanCache[K any, V any] interface {
 
 func NewOperationPlanner(executor *Executor, planCache ExecutionPlanCache[uint64, *planWithMetaData]) *OperationPlanner {
 	return &OperationPlanner{
-		planCache:      planCache,
-		executor:       executor,
-		trackUsageInfo: executor.TrackUsageInfo,
+		planCache: planCache,
+		executor:  executor,
 	}
 }
 
@@ -81,22 +74,13 @@ func (p *OperationPlanner) preparePlan(ctx *operationContext) (*planWithMetaData
 		schemaDocument:    p.executor.RouterSchema,
 	}
 
-	if p.trackUsageInfo {
-		out.typeFieldUsageInfo = graphqlschemausage.GetTypeFieldUsageInfo(preparedPlan)
-		out.argumentUsageInfo, err = graphqlschemausage.GetArgumentUsageInfo(&doc, p.executor.RouterSchema)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	return out, nil
 }
 
 type PlanOptions struct {
-	ClientInfo           *ClientInfo
-	TraceOptions         resolve.TraceOptions
-	ExecutionOptions     resolve.ExecutionOptions
-	TrackSchemaUsageInfo bool
+	ClientInfo       *ClientInfo
+	TraceOptions     resolve.TraceOptions
+	ExecutionOptions resolve.ExecutionOptions
 }
 
 func (p *OperationPlanner) plan(opContext *operationContext, options PlanOptions) (err error) {
@@ -111,14 +95,6 @@ func (p *OperationPlanner) plan(opContext *operationContext, options PlanOptions
 			return err
 		}
 		opContext.preparedPlan = prepared
-		if options.TrackSchemaUsageInfo {
-			opContext.typeFieldUsageInfo = prepared.typeFieldUsageInfo
-			opContext.argumentUsageInfo = prepared.argumentUsageInfo
-			opContext.inputUsageInfo, err = graphqlschemausage.GetInputUsageInfo(prepared.operationDocument, p.executor.RouterSchema, opContext.variables)
-			if err != nil {
-				return err
-			}
-		}
 		return nil
 	}
 
@@ -149,13 +125,6 @@ func (p *OperationPlanner) plan(opContext *operationContext, options PlanOptions
 			return errors.New("unexpected prepared plan type")
 		}
 	}
-	if options.TrackSchemaUsageInfo {
-		opContext.typeFieldUsageInfo = opContext.preparedPlan.typeFieldUsageInfo
-		opContext.argumentUsageInfo = opContext.preparedPlan.argumentUsageInfo
-		opContext.inputUsageInfo, err = graphqlschemausage.GetInputUsageInfo(opContext.preparedPlan.operationDocument, p.executor.RouterSchema, opContext.variables)
-		if err != nil {
-			return err
-		}
-	}
+
 	return nil
 }

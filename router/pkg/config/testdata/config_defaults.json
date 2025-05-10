@@ -1,90 +1,8 @@
 {
   "Version": "1",
   "InstanceID": "",
-  "Graph": {
-    "Token": "token",
-    "SignKey": ""
-  },
-  "Telemetry": {
-    "ServiceName": "cosmo-router",
-    "Attributes": null,
-    "ResourceAttributes": null,
-    "Tracing": {
-      "Enabled": true,
-      "SamplingRate": 1,
-      "ParentBasedSampler": true,
-      "Exporters": null,
-      "Propagation": {
-        "TraceContext": true,
-        "Jaeger": false,
-        "B3": false,
-        "Baggage": false,
-        "Datadog": false
-      },
-      "ResponseTraceHeader": {
-        "Enabled": false,
-        "HeaderName": "x-wg-trace-id"
-      },
-      "ExportGraphQLVariables": false,
-      "WithNewRoot": false
-    },
-    "Metrics": {
-      "Attributes": null,
-      "OTLP": {
-        "Enabled": true,
-        "RouterRuntime": true,
-        "GraphqlCache": false,
-        "EngineStats": {
-          "Subscriptions": false
-        },
-        "ExcludeMetrics": null,
-        "ExcludeMetricLabels": null,
-        "Exporters": null
-      },
-      "Prometheus": {
-        "Enabled": true,
-        "Path": "/metrics",
-        "ListenAddr": "127.0.0.1:8088",
-        "GraphqlCache": false,
-        "EngineStats": {
-          "Subscriptions": false
-        },
-        "ExcludeMetrics": null,
-        "ExcludeMetricLabels": null,
-        "ExcludeScopeInfo": false
-      }
-    }
-  },
-  "GraphqlMetrics": {
-    "Enabled": true,
-    "CollectorEndpoint": "https://cosmo-metrics.wundergraph.com"
-  },
-  "CORS": {
-    "Enabled": true,
-    "AllowOrigins": [
-      "*"
-    ],
-    "AllowMethods": [
-      "HEAD",
-      "GET",
-      "POST"
-    ],
-    "AllowHeaders": [
-      "Origin",
-      "Content-Length",
-      "Content-Type"
-    ],
-    "AllowCredentials": true,
-    "MaxAge": 300000000000
-  },
   "Cluster": {
     "Name": ""
-  },
-  "Compliance": {
-    "AnonymizeIP": {
-      "Enabled": true,
-      "Method": "redact"
-    }
   },
   "TLS": {
     "Server": {
@@ -134,11 +52,6 @@
       "DecompressionEnabled": true
     },
     "Subgraphs": null
-  },
-  "FileUpload": {
-    "Enabled": true,
-    "MaxFileSizeBytes": 50000000,
-    "MaxFiles": 10
   },
   "AccessLogs": {
     "Enabled": true,
@@ -220,52 +133,8 @@
       "Code": "RATE_LIMIT_EXCEEDED"
     }
   },
-  "LocalhostFallbackInsideDocker": true,
-  "CDN": {
-    "URL": "https://cosmo-cdn.wundergraph.com",
-    "CacheSize": 100000000
-  },
   "DevelopmentMode": false,
-  "Events": {
-    "Providers": {
-      "Nats": null,
-      "Kafka": null
-    }
-  },
-  "CacheWarmup": {
-    "Enabled": false,
-    "Source": {
-      "Filesystem": null
-    },
-    "Workers": 8,
-    "ItemsPerSecond": 50,
-    "Timeout": 30000000000
-  },
   "RouterConfigPath": "",
-  "RouterRegistration": true,
-  "OverrideRoutingURL": {
-    "Subgraphs": null
-  },
-  "Overrides": {
-    "Subgraphs": null
-  },
-  "SecurityConfiguration": {
-    "BlockMutations": {
-      "Enabled": false,
-      "Condition": ""
-    },
-    "BlockSubscriptions": {
-      "Enabled": false,
-      "Condition": ""
-    },
-    "BlockNonPersistedOperations": {
-      "Enabled": false,
-      "Condition": ""
-    },
-    "ComplexityCalculationCache": null,
-    "ComplexityLimits": null,
-    "DepthLimit": null
-  },
   "EngineExecutionConfiguration": {
     "Debug": {
       "PrintOperationTransformations": false,
@@ -280,13 +149,11 @@
       "ReportWebSocketConnections": false,
       "ReportMemoryUsage": false,
       "EnableResolverDebugging": false,
-      "EnablePersistedOperationsCacheResponseHeader": false,
       "EnableNormalizationCacheResponseHeader": false,
       "AlwaysIncludeQueryPlan": false,
       "AlwaysSkipLoader": false
     },
     "EnableSingleFlight": true,
-    "EnableRequestTracing": true,
     "EnableExecutionPlanCacheResponseHeader": false,
     "MaxConcurrentResolvers": 1024,
     "EnableNetPoll": true,
@@ -295,7 +162,6 @@
     "WebSocketClientReadTimeout": 5000000000,
     "ExecutionPlanCacheSize": 1024,
     "MinifySubgraphOperations": true,
-    "EnablePersistedOperationsCache": true,
     "EnableNormalizationCache": true,
     "NormalizationCacheSize": 1024,
     "OperationHashCacheSize": 2048,
@@ -351,16 +217,9 @@
     ],
     "AllowedFields": null
   },
-  "StorageProviders": {
-    "S3": null,
-    "CDN": null,
-    "Redis": null
-  },
   "ExecutionConfig": {
     "File": {
-      "Path": "",
-      "Watch": false,
-      "WatchInterval": 1000000000
+      "Path": ""
     },
     "Storage": {
       "ProviderID": "",
@@ -370,30 +229,6 @@
       "Enabled": false,
       "ProviderID": "",
       "ObjectPath": ""
-    }
-  },
-  "PersistedOperationsConfig": {
-    "LogUnknown": false,
-    "Safelist": {
-      "Enabled": false
-    },
-    "Cache": {
-      "Size": 100000000
-    },
-    "Storage": {
-      "ProviderID": "",
-      "ObjectPrefix": ""
-    }
-  },
-  "AutomaticPersistedQueries": {
-    "Enabled": false,
-    "Cache": {
-      "Size": 100000000,
-      "TTL": -1
-    },
-    "Storage": {
-      "ProviderID": "",
-      "ObjectPrefix": ""
     }
   },
   "ApolloCompatibilityFlags": {

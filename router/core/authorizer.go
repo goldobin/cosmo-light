@@ -3,17 +3,17 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"github.com/wundergraph/cosmo/router/internal/rconf"
 	"io"
 	"slices"
 	"sync"
 
-	nodev1 "github.com/wundergraph/cosmo/router/gen/proto/wg/cosmo/node/v1"
 	"github.com/wundergraph/cosmo/router/pkg/authentication"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
 )
 
 type CosmoAuthorizerOptions struct {
-	FieldConfigurations           []*nodev1.FieldConfiguration
+	FieldConfigurations           []*rconf.FieldConfiguration
 	RejectOperationIfUnauthorized bool
 }
 
@@ -25,7 +25,7 @@ func NewCosmoAuthorizer(opts *CosmoAuthorizerOptions) *CosmoAuthorizer {
 }
 
 type CosmoAuthorizer struct {
-	fieldConfigurations []*nodev1.FieldConfiguration
+	fieldConfigurations []*rconf.FieldConfiguration
 	rejectUnauthorized  bool
 }
 
@@ -77,7 +77,7 @@ func (a *CosmoAuthorizer) AuthorizeObjectField(ctx *resolve.Context, dataSourceI
 	return a.handleRejectUnauthorized(a.validateScopes(ctx, coordinate, required, isAuthenticated, actual))
 }
 
-func (a *CosmoAuthorizer) validateScopes(ctx *resolve.Context, coordinate resolve.GraphCoordinate, requiredOrScopes []*nodev1.Scopes, isAuthenticated bool, actual []string) (result *resolve.AuthorizationDeny) {
+func (a *CosmoAuthorizer) validateScopes(ctx *resolve.Context, coordinate resolve.GraphCoordinate, requiredOrScopes []*rconf.Scopes, isAuthenticated bool, actual []string) (result *resolve.AuthorizationDeny) {
 	if !isAuthenticated {
 		return &resolve.AuthorizationDeny{
 			Reason: "not authenticated",
@@ -101,7 +101,7 @@ WithNext:
 	}
 }
 
-func (a *CosmoAuthorizer) addMissingScopes(ctx *resolve.Context, coordinate resolve.GraphCoordinate, requiredOrScopes []*nodev1.Scopes, actual []string) {
+func (a *CosmoAuthorizer) addMissingScopes(ctx *resolve.Context, coordinate resolve.GraphCoordinate, requiredOrScopes []*rconf.Scopes, actual []string) {
 	extensionCtx := ctx.Context().Value(authorizationExtensionKey{})
 	if extensionCtx == nil {
 		return
@@ -160,7 +160,7 @@ type RequiredAndScopes struct {
 	RequiredAndScopes []string `json:"and"`
 }
 
-func (a *CosmoAuthorizer) missingScopesError(coordinate resolve.GraphCoordinate, requiredOrScopes []*nodev1.Scopes) MissingScopesError {
+func (a *CosmoAuthorizer) missingScopesError(coordinate resolve.GraphCoordinate, requiredOrScopes []*rconf.Scopes) MissingScopesError {
 	out := MissingScopesError{
 		Coordinate:       coordinate,
 		RequiredOrScopes: a.requiredAndScopes(requiredOrScopes),
@@ -168,7 +168,7 @@ func (a *CosmoAuthorizer) missingScopesError(coordinate resolve.GraphCoordinate,
 	return out
 }
 
-func (a *CosmoAuthorizer) requiredAndScopes(requiredOrScopes []*nodev1.Scopes) [][]string {
+func (a *CosmoAuthorizer) requiredAndScopes(requiredOrScopes []*rconf.Scopes) [][]string {
 	var result [][]string
 	for i := range requiredOrScopes {
 		result = append(result, requiredOrScopes[i].RequiredAndScopes)
@@ -176,7 +176,7 @@ func (a *CosmoAuthorizer) requiredAndScopes(requiredOrScopes []*nodev1.Scopes) [
 	return result
 }
 
-func (a *CosmoAuthorizer) requiredScopesForField(coordinate resolve.GraphCoordinate) []*nodev1.Scopes {
+func (a *CosmoAuthorizer) requiredScopesForField(coordinate resolve.GraphCoordinate) []*rconf.Scopes {
 	for i := range a.fieldConfigurations {
 		if a.fieldConfigurations[i].TypeName == coordinate.TypeName && a.fieldConfigurations[i].FieldName == coordinate.FieldName {
 			return a.fieldConfigurations[i].AuthorizationConfiguration.RequiredOrScopes

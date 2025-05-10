@@ -1,1 +1,0 @@
-ALTER TABLE "schema_versions" DROP COLUMN IF EXISTS "supergraph_sdl";

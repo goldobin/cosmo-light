@@ -10,15 +10,11 @@ import (
 	"github.com/hashicorp/go-multierror"
 	"github.com/wundergraph/astjson"
 	rErrors "github.com/wundergraph/cosmo/router/internal/errors"
-	"github.com/wundergraph/cosmo/router/internal/persistedoperation"
 	"github.com/wundergraph/cosmo/router/internal/unique"
-	"github.com/wundergraph/cosmo/router/pkg/pubsub"
-	rtrace "github.com/wundergraph/cosmo/router/pkg/trace"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/datasource/graphql_datasource"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/engine/resolve"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/graphqlerrors"
 	"github.com/wundergraph/graphql-go-tools/v2/pkg/operationreport"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -26,7 +22,6 @@ type errorType int
 
 const (
 	errorTypeUnknown errorType = iota
-	errorTypeRateLimit
 	errorTypeUnauthorized
 	errorTypeContextCanceled
 	errorTypeContextTimeout
@@ -54,9 +49,6 @@ type (
 )
 
 func getErrorType(err error) errorType {
-	if errors.Is(err, ErrRateLimitExceeded) {
-		return errorTypeRateLimit
-	}
 	if errors.Is(err, ErrUnauthorized) {
 		return errorTypeUnauthorized
 	}
@@ -72,10 +64,6 @@ func getErrorType(err error) errorType {
 		if nErr.Timeout() {
 			return errorTypeContextTimeout
 		}
-	}
-	var edfsErr *pubsub.Error
-	if errors.As(err, &edfsErr) {
-		return errorTypeEDFS
 	}
 	var invalidWsSubprotocolErr graphql_datasource.InvalidWsSubprotocolError
 	if errors.As(err, &invalidWsSubprotocolErr) {
@@ -111,7 +99,6 @@ func trackFinalResponseError(ctx context.Context, err error) {
 		return
 	}
 
-	span := trace.SpanFromContext(ctx)
 	requestContext := getRequestContext(ctx)
 	if requestContext == nil {
 		return
@@ -120,8 +107,6 @@ func trackFinalResponseError(ctx context.Context, err error) {
 	requestContext.SetError(err)
 	requestContext.graphQLErrorServices = getAggregatedSubgraphServiceNames(requestContext.error)
 	requestContext.graphQLErrorCodes = getAggregatedSubgraphErrorCodes(requestContext.error)
-
-	rtrace.AttachErrToSpan(span, err)
 }
 
 func getAggregatedSubgraphErrorCodes(err error) []string {
@@ -311,13 +296,10 @@ func writeOperationError(r *http.Request, w http.ResponseWriter, requestLogger *
 
 	var reportErr ReportError
 	var httpErr HttpError
-	var poNotFoundErr *persistedoperation.PersistentOperationNotFoundError
+
 	switch {
 	case errors.As(err, &httpErr):
 		writeRequestErrors(r, w, httpErr.StatusCode(), requestErrorsFromHttpError(httpErr), requestLogger)
-	case errors.As(err, &poNotFoundErr):
-		newErr := NewHttpGraphqlError("PersistedQueryNotFound", "PERSISTED_QUERY_NOT_FOUND", http.StatusOK)
-		writeRequestErrors(r, w, http.StatusOK, requestErrorsFromHttpError(newErr), requestLogger)
 	case errors.As(err, &reportErr):
 		report := reportErr.Report()
 		logInternalErrorsFromReport(reportErr.Report(), requestLogger)

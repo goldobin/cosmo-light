@@ -1,7 +1,0 @@
-type Query {
-  accounts: [Account!]!
-}
-
-type Account @key(fields: "id") {
-  id: Int!
-}

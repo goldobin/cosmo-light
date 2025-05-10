@@ -73,10 +73,6 @@ Here's a selection of blog posts that focus on the technical aspects of Cosmo:
 - [**ASTJSON - A fast way to merge JSON objects**](https://wundergraph.com/blog/astjson_high_performance_json_transformations_in_golang)
 - [**Dataloader 3.0, an efficient algorithm for Federation data loading**](https://wundergraph.com/blog/dataloader_3_0_breadth_first_data_loading)
 
-## Contributing
-
-We welcome contributions from the community! Whether it's fixing a bug, adding new features, or improving documentation, your help is greatly appreciated. Please take a look in our [Contributing Guide](CONTRIBUTING.md) to get started.
-
 ## License
 
 Cosmo is licensed under the [Apache License, Version 2.0](LICENSE).

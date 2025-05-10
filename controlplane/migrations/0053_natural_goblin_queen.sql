@@ -1,1 +1,0 @@
-ALTER TABLE "oidc_providers" ADD CONSTRAINT "oidc_providers_alias_unique" UNIQUE("alias");
